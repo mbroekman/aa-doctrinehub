@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Dutch translation:** `locale/nl` for model names, statuses and roles.
+
 - **Project scaffolding (TASK-1.1):** Django app `aa_doctrinehub` with permissions (`basic_access`,
   `manage_doctrines`, `view_compliance`, `manage_rules`), test harness, CI and pre-commit configuration.
 - **Catalogue models (TASK-1.2):** categories with group visibility, doctrines with status, fittings with
