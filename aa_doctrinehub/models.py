@@ -47,7 +47,7 @@ class SourcedQuerySet(models.QuerySet):
 class SourcedModel(models.Model):
     """Abstract base for records that can be synced from an external source."""
 
-    source = models.CharField(max_length=16, choices=Source.choices, default=Source.LOCAL, db_index=True)
+    source = models.CharField(max_length=16, choices=Source, default=Source.LOCAL, db_index=True)
     external_id = models.PositiveBigIntegerField(
         null=True,
         blank=True,
