@@ -15,7 +15,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from .models import Category, DoctrineFitting, Fitting, SyncSettings
 from .services.eft import EftParseError
 from .services.fittings import import_eft, version_eft, version_multibuy
-from .services.fittings_sync import fittings_app_installed, sync_from_fittings_app
+from .services.fittings_sync import fittings_app_installed
 from .services.visibility import visible_doctrines, visible_fittings
 
 
@@ -186,8 +186,16 @@ def sync_settings(request: HttpRequest) -> JsonResponse:
 @permission_required("aa_doctrinehub.manage_doctrines")
 @require_POST
 def run_fittings_sync(request: HttpRequest) -> JsonResponse:
-    """Run the Fittings sync now."""
+    """Queue the Fittings sync to run now, in the background.
+
+    Dispatches the same Celery task the daily beat schedule uses, rather
+    than running the sync inline: a large Fittings catalogue can take long
+    enough to risk a request timeout and ties up a web worker for no
+    reason when a task queue already exists for this exact job.
+    """
     if not fittings_app_installed():
         return JsonResponse({"error": "The Fittings app is not installed on this Auth"}, status=409)
-    sync_from_fittings_app()
-    return JsonResponse(_sync_settings_payload(SyncSettings.get_solo()))
+    from .tasks import sync_from_fittings
+
+    sync_from_fittings.delay(force=True)
+    return JsonResponse({"queued": True, **_sync_settings_payload(SyncSettings.get_solo())})

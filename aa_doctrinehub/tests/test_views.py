@@ -1,6 +1,7 @@
 """Tests for the page and JSON API views."""
 
 import json
+from unittest.mock import patch
 
 import pytest
 from allianceauth.tests.auth_utils import AuthUtils
@@ -69,6 +70,21 @@ def test_doctrines_shows_restricted_category_to_group_member(client):
     assert [d["name"] for d in data["doctrines"]] == ["Restricted"]
 
 
+def test_doctrine_with_public_and_restricted_category_hidden_from_outsider(client):
+    """A doctrine tagged with both a public category and a group-restricted
+    one must stay hidden from users outside that group - the public
+    category must not leak the restricted one."""
+    restricted = _doctrine("Mixed")
+    public_category = Category.objects.create(name="General")
+    restricted_category = Category.objects.create(name="Capitals")
+    restricted_category.visible_to_groups.add(Group.objects.create(name="SIG: Capitals"))
+    restricted.categories.add(public_category, restricted_category)
+
+    client.force_login(_user("basic_access"))
+    data = client.get(reverse("aa_doctrinehub:api_doctrines")).json()
+    assert data["doctrines"] == []
+
+
 def test_fitting_detail_returns_eft_and_multibuy(client):
     fitting = import_eft(EFT)
     client.force_login(_user("basic_access"))
@@ -111,3 +127,18 @@ def test_run_sync_without_fittings_app_returns_conflict(client):
     client.force_login(_user("basic_access", "manage_doctrines"))
     response = client.post(reverse("aa_doctrinehub:api_run_fittings_sync"))
     assert response.status_code == 409
+
+
+def test_run_sync_queues_the_celery_task_instead_of_running_inline(client):
+    """A large Fittings catalogue can take long enough to risk a request
+    timeout, so "Sync now" must dispatch the existing Celery task rather
+    than call sync_from_fittings_app() in the request/response cycle."""
+    client.force_login(_user("basic_access", "manage_doctrines"))
+    with (
+        patch("aa_doctrinehub.views_spa_api.fittings_app_installed", return_value=True),
+        patch("aa_doctrinehub.tasks.sync_from_fittings.delay") as mock_delay,
+    ):
+        response = client.post(reverse("aa_doctrinehub:api_run_fittings_sync"))
+    assert response.status_code == 200
+    assert response.json()["queued"] is True
+    mock_delay.assert_called_once_with(force=True)

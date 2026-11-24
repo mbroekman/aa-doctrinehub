@@ -142,7 +142,7 @@ export function App() {
         </TabsContent>
         {config.canManage && (
           <TabsContent value="settings">
-            <SyncSettingsView onSynced={load} />
+            <SyncSettingsView />
           </TabsContent>
         )}
       </Tabs>

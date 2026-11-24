@@ -47,5 +47,6 @@ export const api = {
   syncSettings: () => request<SyncSettings>("settings/sync/"),
   saveSyncSettings: (changes: Partial<SyncSettings>) =>
     request<SyncSettings>("settings/sync/", { method: "POST", body: JSON.stringify(changes) }),
-  runFittingsSync: () => request<SyncSettings>("settings/sync/run/", { method: "POST" }),
+  runFittingsSync: () =>
+    request<SyncSettings & { queued: boolean }>("settings/sync/run/", { method: "POST" }),
 };

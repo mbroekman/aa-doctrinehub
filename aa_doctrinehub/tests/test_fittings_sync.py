@@ -101,6 +101,47 @@ def test_removed_fitting_kept_when_a_local_doctrine_uses_it():
     assert Fitting.objects.filter(external_id=10).exists()
 
 
+def test_doctrine_fitting_reorder_updates_order_without_recreating_links():
+    """A pure reorder in the Fittings app must update the existing
+    DoctrineFitting links' order, and must not touch the local role/
+    is_required metadata a manager set on them here."""
+    fitting_a = _fitting(external_id=10)
+    fitting_b = SourceFitting(
+        external_id=11,
+        name="Logi Guardian",
+        description="",
+        ship_type_id=11987,
+        ship_type_name="Guardian",
+        eft="",
+    )
+    snap = SourceSnapshot(fittings=[fitting_a, fitting_b])
+    snap.doctrines.append(
+        SourceDoctrine(external_id=5, name="Shield HAC", description="", icon_url="", fitting_ids=[10, 11])
+    )
+    apply_snapshot(snap)
+
+    doctrine = Doctrine.objects.get(external_id=5)
+    link_a = DoctrineFitting.objects.get(doctrine=doctrine, fitting__external_id=10)
+    link_b = DoctrineFitting.objects.get(doctrine=doctrine, fitting__external_id=11)
+    assert (link_a.order, link_b.order) == (0, 1)
+
+    link_a.role = DoctrineFitting.Role.LOGISTICS
+    link_a.is_required = False
+    link_a.save()
+
+    snap2 = SourceSnapshot(fittings=[fitting_a, fitting_b])
+    snap2.doctrines.append(
+        SourceDoctrine(external_id=5, name="Shield HAC", description="", icon_url="", fitting_ids=[11, 10])
+    )
+    apply_snapshot(snap2)
+
+    link_a.refresh_from_db()
+    link_b.refresh_from_db()
+    assert (link_a.order, link_b.order) == (1, 0)
+    assert link_a.role == DoctrineFitting.Role.LOGISTICS
+    assert link_a.is_required is False
+
+
 def test_category_groups_are_copied():
     group = Group.objects.create(name="Alliance members")
     apply_snapshot(_snapshot(group_ids=[group.pk]))

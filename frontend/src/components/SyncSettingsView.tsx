@@ -5,10 +5,11 @@ import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import type { SyncSettings } from "@/types";
 
-export function SyncSettingsView({ onSynced }: { onSynced: () => void }) {
+export function SyncSettingsView() {
   const [settings, setSettings] = useState<SyncSettings | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [queued, setQueued] = useState(false);
 
   useEffect(() => {
     api.syncSettings().then(setSettings).catch((e: Error) => setError(e.message));
@@ -26,9 +27,10 @@ export function SyncSettingsView({ onSynced }: { onSynced: () => void }) {
   const runNow = async () => {
     setBusy(true);
     setError("");
+    setQueued(false);
     try {
-      setSettings(await api.runFittingsSync());
-      onSynced();
+      await api.runFittingsSync();
+      setQueued(true);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -82,6 +84,11 @@ export function SyncSettingsView({ onSynced }: { onSynced: () => void }) {
               : "Never synced."}
           </span>
         </div>
+        {queued && (
+          <p className="text-muted-foreground">
+            Sync queued - this runs in the background and may take a moment. Reopen this page to see the result.
+          </p>
+        )}
         {error && <p className="text-destructive">{error}</p>}
       </CardContent>
     </Card>

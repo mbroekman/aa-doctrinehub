@@ -240,10 +240,14 @@ def _sync_doctrine(source: SourceDoctrine, fittings: dict[int, Fitting], now: An
 
     wanted = [fittings[pk] for pk in source.fitting_ids if pk in fittings]
     doctrine.doctrine_fittings.exclude(fitting__in=wanted).delete()
-    existing = set(doctrine.doctrine_fittings.values_list("fitting_id", flat=True))
+    existing = {df.fitting_id: df for df in doctrine.doctrine_fittings.all()}
     for order, fitting in enumerate(wanted):
-        if fitting.pk not in existing:
+        link = existing.get(fitting.pk)
+        if link is None:
             DoctrineFitting.objects.create(doctrine=doctrine, fitting=fitting, order=order)
+        elif link.order != order:
+            link.order = order
+            link.save(update_fields=["order"])
     if created:
         result.doctrines_created += 1
     else:
