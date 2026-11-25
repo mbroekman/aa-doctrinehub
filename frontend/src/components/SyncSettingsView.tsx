@@ -66,7 +66,7 @@ export function SyncSettingsView() {
     if (mode === "preview") {
       setScrapeResult(null);
     }
-    const appendLog = (msg: string) => setScrapeLogs((prev) => [...prev, msg]);
+    const appendLog = (msg: string) => setScrapeLogs((prev) => [msg, ...prev]);
     try {
       const parsedLimit = batchLimit.trim() ? Number(batchLimit.trim()) : null;
       const parsedOffset = Math.max(0, Number(batchOffset.trim() || "0") || 0);
