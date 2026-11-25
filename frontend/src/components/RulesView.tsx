@@ -8,6 +8,8 @@ import { api } from "@/lib/api";
 import type {
   AuditLogEntry,
   ComplianceRule,
+  Doctrine,
+  FittingSummary,
   NotificationSettings,
   PendingApprovalItem,
   RuleConditionNode,
@@ -16,7 +18,7 @@ import type {
 const CONDITION_TYPES = [
   { value: "can_fly_fitting", label: "Can fly fitting" },
   { value: "doctrine_coverage", label: "Doctrine coverage (%)" },
-  { value: "skill", label: "Skill level" },
+  { value: "skill", label: "Specific skill level" },
   { value: "total_sp", label: "Minimum Total SP" },
   { value: "ship_owned", label: "Ship owned in assets" },
   { value: "implant", label: "Implant active" },
@@ -24,7 +26,74 @@ const CONDITION_TYPES = [
   { value: "fleet_participation", label: "Fleet participation (FATs)" },
 ];
 
-export function RulesView() {
+interface DraftCondition {
+  type: string;
+  fittingId: number;
+  fittingLevel: "minimum" | "recommended";
+  doctrineId: number;
+  minPct: number;
+  skillId: number;
+  minSkillLevel: number;
+  minSp: number;
+  shipTypeId: number;
+  minCount: number;
+  implantName: string;
+  otherGroupId: number;
+  days: number;
+  minFats: number;
+}
+
+function makeDefaultCondition(
+  doctrines: Doctrine[],
+  fittings: FittingSummary[],
+  groups: { id: number; name: string }[],
+): DraftCondition {
+  return {
+    type: fittings.length ? "can_fly_fitting" : doctrines.length ? "doctrine_coverage" : "skill",
+    fittingId: fittings[0]?.id ?? 0,
+    fittingLevel: "minimum",
+    doctrineId: doctrines[0]?.id ?? 0,
+    minPct: 100,
+    skillId: 20533,
+    minSkillLevel: 1,
+    minSp: 15000000,
+    shipTypeId: fittings[0]?.ship_type_id ?? 0,
+    minCount: 1,
+    implantName: "",
+    otherGroupId: groups[0]?.id ?? 0,
+    days: 30,
+    minFats: 1,
+  };
+}
+
+function toConditionNode(c: DraftCondition): RuleConditionNode {
+  switch (c.type) {
+    case "can_fly_fitting":
+      return { type: "can_fly_fitting", fitting_id: c.fittingId, level: c.fittingLevel };
+    case "doctrine_coverage":
+      return { type: "doctrine_coverage", doctrine_id: c.doctrineId, min_required_pct: c.minPct };
+    case "skill":
+      return { type: "skill", skill_id: c.skillId, min_level: c.minSkillLevel };
+    case "total_sp":
+      return { type: "total_sp", min_sp: c.minSp };
+    case "ship_owned":
+      return { type: "ship_owned", ship_type_id: c.shipTypeId, min_count: c.minCount };
+    case "implant":
+      return { type: "implant", type_name: c.implantName };
+    case "other_group":
+      return { type: "other_group", group_id: c.otherGroupId };
+    default:
+      return { type: "fleet_participation", days: c.days, min_fats: c.minFats };
+  }
+}
+
+export function RulesView({
+  doctrines,
+  fittings,
+}: {
+  doctrines: Doctrine[];
+  fittings: FittingSummary[];
+}) {
   const [rules, setRules] = useState<ComplianceRule[]>([]);
   const [groups, setGroups] = useState<{ id: number; name: string }[]>([]);
   const [approvals, setApprovals] = useState<PendingApprovalItem[]>([]);
@@ -33,16 +102,15 @@ export function RulesView() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // New rule builder state
   const [name, setName] = useState("");
   const [groupId, setGroupId] = useState<number>(0);
   const [mode, setMode] = useState<ComplianceRule["mode"]>("report_only");
   const [op, setOp] = useState<"AND" | "OR" | "AT_LEAST">("AND");
   const [atLeastN, setAtLeastN] = useState(1);
   const [graceHours, setGraceHours] = useState(48);
-  const [condType, setCondType] = useState("skill");
-  const [condParam1, setCondParam1] = useState("20533");
-  const [condParam2, setCondParam2] = useState("1");
+  const [conditions, setConditions] = useState<DraftCondition[]>(() => [
+    makeDefaultCondition(doctrines, fittings, []),
+  ]);
 
   const load = useCallback(() => {
     setError("");
@@ -60,25 +128,18 @@ export function RulesView() {
 
   useEffect(load, [load]);
 
-  const buildLeaf = (): RuleConditionNode => {
-    if (condType === "can_fly_fitting") return { type: "can_fly_fitting", fitting_id: Number(condParam1), level: "minimum" };
-    if (condType === "doctrine_coverage") return { type: "doctrine_coverage", doctrine_id: Number(condParam1), min_required_pct: Number(condParam2) || 100 };
-    if (condType === "skill") return { type: "skill", skill_id: Number(condParam1), min_level: Number(condParam2) || 1 };
-    if (condType === "total_sp") return { type: "total_sp", min_sp: Number(condParam1) || 10000000 };
-    if (condType === "ship_owned") return { type: "ship_owned", ship_type_id: Number(condParam1), min_count: Number(condParam2) || 1 };
-    if (condType === "implant") return { type: "implant", type_name: condParam1 };
-    if (condType === "other_group") return { type: "other_group", group_name: condParam1 };
-    return { type: "fleet_participation", days: Number(condParam1) || 30, min_fats: Number(condParam2) || 1 };
+  const updateCond = (idx: number, patch: Partial<DraftCondition>) => {
+    setConditions((prev) => prev.map((item, i) => (i === idx ? { ...item, ...patch } : item)));
   };
 
   const handleCreate = async () => {
-    if (!name.trim() || !groupId) return;
+    if (!name.trim() || !groupId || !conditions.length) return;
     setBusy(true);
     try {
       const tree: RuleConditionNode = {
         op,
-        ...(op === "AT_LEAST" ? { n: atLeastN } : {}),
-        children: [buildLeaf()],
+        ...(op === "AT_LEAST" ? { n: Math.min(atLeastN, conditions.length) } : {}),
+        children: conditions.map(toConditionNode),
       };
       await api.createRule({
         name: name.trim(),
@@ -88,6 +149,7 @@ export function RulesView() {
         condition_tree: tree,
       });
       setName("");
+      setConditions([makeDefaultCondition(doctrines, fittings, groups)]);
       load();
     } catch (e) {
       setError((e as Error).message);
@@ -127,73 +189,294 @@ export function RulesView() {
             <CardTitle className="text-base">Rule Builder</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Input placeholder="Rule name (e.g. SIG: Logistics)" value={name} onChange={(e) => setName(e.target.value)} />
-              <select
-                value={groupId}
-                onChange={(e) => setGroupId(Number(e.target.value))}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-              >
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Rule name</label>
+                <Input placeholder="e.g. SIG: Logistics" value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Auth group to grant</label>
+                <select
+                  value={groupId}
+                  onChange={(e) => setGroupId(Number(e.target.value))}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div className="grid gap-2 sm:grid-cols-3">
-              <select
-                value={mode}
-                onChange={(e) => setMode(e.target.value as ComplianceRule["mode"])}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="report_only">Report only</option>
-                <option value="automatic">Automatic</option>
-                <option value="reviewer_approval">Reviewer approval</option>
-              </select>
-              <select
-                value={op}
-                onChange={(e) => setOp(e.target.value as "AND" | "OR" | "AT_LEAST")}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="AND">AND (all match)</option>
-                <option value="OR">OR (any matches)</option>
-                <option value="AT_LEAST">At least N</option>
-              </select>
-              <Input
-                type="number"
-                min={1}
-                value={op === "AT_LEAST" ? atLeastN : graceHours}
-                onChange={(e) =>
-                  op === "AT_LEAST" ? setAtLeastN(Number(e.target.value)) : setGraceHours(Number(e.target.value))
-                }
-                placeholder={op === "AT_LEAST" ? "N" : "Grace (h)"}
-                title={op === "AT_LEAST" ? "Minimum matching conditions" : "Grace period in hours"}
-              />
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Action mode</label>
+                <select
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value as ComplianceRule["mode"])}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="report_only">Report only</option>
+                  <option value="automatic">Automatic</option>
+                  <option value="reviewer_approval">Reviewer approval</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Combine conditions</label>
+                <select
+                  value={op}
+                  onChange={(e) => setOp(e.target.value as "AND" | "OR" | "AT_LEAST")}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="AND">AND (all must match)</option>
+                  <option value="OR">OR (any must match)</option>
+                  <option value="AT_LEAST">At least N must match</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Grace period (hours)</label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={graceHours}
+                  onChange={(e) => setGraceHours(Number(e.target.value))}
+                />
+              </div>
             </div>
-            <div className="grid gap-2 sm:grid-cols-3">
-              <select
-                value={condType}
-                onChange={(e) => setCondType(e.target.value)}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-              >
-                {CONDITION_TYPES.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-              <Input
-                value={condParam1}
-                onChange={(e) => setCondParam1(e.target.value)}
-                placeholder="ID / Name / Days"
-              />
-              <Input
-                value={condParam2}
-                onChange={(e) => setCondParam2(e.target.value)}
-                placeholder="Level / Count / %"
-              />
+
+            {op === "AT_LEAST" && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Minimum matching conditions (N)
+                </label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={Math.max(1, conditions.length)}
+                  value={atLeastN}
+                  onChange={(e) => setAtLeastN(Number(e.target.value))}
+                  className="w-32"
+                />
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-muted-foreground">Conditions</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setConditions((prev) => [...prev, makeDefaultCondition(doctrines, fittings, groups)])
+                  }
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Add condition
+                </Button>
+              </div>
+
+              {conditions.map((cond, idx) => (
+                <div key={idx} className="space-y-2 rounded-md border border-border p-2.5">
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={cond.type}
+                      onChange={(e) => updateCond(idx, { type: e.target.value })}
+                      className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      {CONDITION_TYPES.map((c) => (
+                        <option key={c.value} value={c.value}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                    {conditions.length > 1 && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setConditions((prev) => prev.filter((_, i) => i !== idx))}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      </Button>
+                    )}
+                  </div>
+
+                  {cond.type === "can_fly_fitting" && (
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <div className="space-y-1 sm:col-span-2">
+                        <label className="text-xs text-muted-foreground">Fitting</label>
+                        <select
+                          value={cond.fittingId}
+                          onChange={(e) => updateCond(idx, { fittingId: Number(e.target.value) })}
+                          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          {fittings.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {f.ship_type_name} — {f.name}
+                            </option>
+                          ))}
+                          {!fittings.length && <option value={0}>No fittings available</option>}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Skill target</label>
+                        <select
+                          value={cond.fittingLevel}
+                          onChange={(e) =>
+                            updateCond(idx, { fittingLevel: e.target.value as "minimum" | "recommended" })
+                          }
+                          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          <option value="minimum">Minimum</option>
+                          <option value="recommended">Recommended</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {cond.type === "doctrine_coverage" && (
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <div className="space-y-1 sm:col-span-2">
+                        <label className="text-xs text-muted-foreground">Doctrine</label>
+                        <select
+                          value={cond.doctrineId}
+                          onChange={(e) => updateCond(idx, { doctrineId: Number(e.target.value) })}
+                          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          {doctrines.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.name}
+                            </option>
+                          ))}
+                          {!doctrines.length && <option value={0}>No doctrines available</option>}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Required coverage (%)</label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={cond.minPct}
+                          onChange={(e) => updateCond(idx, { minPct: Number(e.target.value) })}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {cond.type === "skill" && (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Skill Type ID</label>
+                        <Input
+                          type="number"
+                          value={cond.skillId}
+                          onChange={(e) => updateCond(idx, { skillId: Number(e.target.value) })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Minimum level (1–5)</label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={5}
+                          value={cond.minSkillLevel}
+                          onChange={(e) => updateCond(idx, { minSkillLevel: Number(e.target.value) })}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {cond.type === "total_sp" && (
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Minimum Total Skillpoints</label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={1000000}
+                        value={cond.minSp}
+                        onChange={(e) => updateCond(idx, { minSp: Number(e.target.value) })}
+                      />
+                    </div>
+                  )}
+
+                  {cond.type === "ship_owned" && (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Ship Type ID</label>
+                        <Input
+                          type="number"
+                          value={cond.shipTypeId}
+                          onChange={(e) => updateCond(idx, { shipTypeId: Number(e.target.value) })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Minimum hulls owned</label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={cond.minCount}
+                          onChange={(e) => updateCond(idx, { minCount: Number(e.target.value) })}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {cond.type === "implant" && (
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Implant name (contains)</label>
+                      <Input
+                        placeholder="e.g. High-grade Amulet"
+                        value={cond.implantName}
+                        onChange={(e) => updateCond(idx, { implantName: e.target.value })}
+                      />
+                    </div>
+                  )}
+
+                  {cond.type === "other_group" && (
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Required Auth group</label>
+                      <select
+                        value={cond.otherGroupId}
+                        onChange={(e) => updateCond(idx, { otherGroupId: Number(e.target.value) })}
+                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      >
+                        {groups.map((g) => (
+                          <option key={g.id} value={g.id}>
+                            {g.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {cond.type === "fleet_participation" && (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Lookback window (days)</label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={cond.days}
+                          onChange={(e) => updateCond(idx, { days: Number(e.target.value) })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Minimum FATs</label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={cond.minFats}
+                          onChange={(e) => updateCond(idx, { minFats: Number(e.target.value) })}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
+
             <Button size="sm" onClick={handleCreate} disabled={busy || !name.trim()}>
               <Plus className="mr-1 h-3.5 w-3.5" />
               Create Rule
@@ -204,27 +487,33 @@ export function RulesView() {
         {notif && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Discord Notifications & Language</CardTitle>
+              <CardTitle className="text-base">Discord Notifications &amp; Language</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Input
-                placeholder="Discord webhook URL"
-                value={notif.discord_webhook_url}
-                onChange={(e) => setNotif({ ...notif, discord_webhook_url: e.target.value })}
-              />
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Discord webhook URL</label>
+                <Input
+                  placeholder="https://discord.com/api/webhooks/..."
+                  value={notif.discord_webhook_url}
+                  onChange={(e) => setNotif({ ...notif, discord_webhook_url: e.target.value })}
+                />
+              </div>
               <div className="flex flex-wrap items-center gap-3">
-                <select
-                  value={notif.discord_language}
-                  onChange={(e) => setNotif({ ...notif, discord_language: e.target.value })}
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  {notif.language_choices.map((c) => (
-                    <option key={c.code} value={c.code}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-                <label className="flex items-center gap-2 text-sm">
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-muted-foreground">Channel message language</label>
+                  <select
+                    value={notif.discord_language}
+                    onChange={(e) => setNotif({ ...notif, discord_language: e.target.value })}
+                    className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    {notif.language_choices.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <label className="mt-5 flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
                     checked={notif.dm_warnings_enabled}

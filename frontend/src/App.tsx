@@ -303,7 +303,7 @@ export function App() {
         )}
         {config.canManageRules && (
           <TabsContent value="rules">
-            <RulesView />
+            <RulesView doctrines={doctrines} fittings={fittings} />
           </TabsContent>
         )}
         <TabsContent value="integrations">
