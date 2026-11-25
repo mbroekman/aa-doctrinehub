@@ -77,7 +77,9 @@ def _eval_leaf(node: dict[str, Any], user: User, snapshots: list[CharacterSkillS
 
     if ctype == "doctrine_coverage":
         doctrine_id = int(node.get("doctrine_id") or 0)
+        fitting_id = int(node.get("fitting_id") or 0)
         min_pct = float(node.get("min_required_pct", 100))
+        level = str(node.get("level", "minimum"))
         doctrine = (
             Doctrine.objects.filter(pk=doctrine_id)
             .prefetch_related("doctrine_fittings__fitting__versions__skill_requirements")
@@ -87,6 +89,21 @@ def _eval_leaf(node: dict[str, Any], user: User, snapshots: list[CharacterSkillS
             return UNKNOWN, "Doctrine not found"
         if not snapshots:
             return UNKNOWN, "No synced skill snapshot"
+        if fitting_id:
+            df = next((item for item in doctrine.doctrine_fittings.all() if item.fitting_id == fitting_id), None)
+            if df is None or df.fitting.current_version is None:
+                return UNKNOWN, f"Fitting {fitting_id} not found in {doctrine.name}"
+            reqs = list(df.fitting.current_version.skill_requirements.all())
+            best = max(
+                (evaluate_fitting_for_snapshot(reqs, s) for s in snapshots),
+                key=lambda e: STATUS_RANK[e["status"]],
+            )
+            ok_statuses = {"green"} if level == "recommended" else {"green", "yellow"}
+            if best["status"] in ok_statuses:
+                return PASS, f"{doctrine.name}: can fly {df.fitting.name}"
+            if best["status"] == "unknown":
+                return UNKNOWN, "Skill snapshot unknown"
+            return FAIL, f"{doctrine.name}: cannot fly {df.fitting.name}"
         req_dfs = [df for df in doctrine.doctrine_fittings.all() if df.is_required and df.fitting.current_version]
         if not req_dfs:
             return PASS, f"{doctrine.name}: no required fittings"

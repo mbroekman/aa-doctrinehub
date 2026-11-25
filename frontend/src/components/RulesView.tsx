@@ -31,6 +31,7 @@ interface DraftCondition {
   fittingId: number;
   fittingLevel: "minimum" | "recommended";
   doctrineId: number;
+  doctrineFittingId: number;
   minPct: number;
   skillId: number;
   minSkillLevel: number;
@@ -53,6 +54,7 @@ function makeDefaultCondition(
     fittingId: fittings[0]?.id ?? 0,
     fittingLevel: "minimum",
     doctrineId: doctrines[0]?.id ?? 0,
+    doctrineFittingId: 0,
     minPct: 100,
     skillId: 20533,
     minSkillLevel: 1,
@@ -71,7 +73,9 @@ function toConditionNode(c: DraftCondition): RuleConditionNode {
     case "can_fly_fitting":
       return { type: "can_fly_fitting", fitting_id: c.fittingId, level: c.fittingLevel };
     case "doctrine_coverage":
-      return { type: "doctrine_coverage", doctrine_id: c.doctrineId, min_required_pct: c.minPct };
+      return c.doctrineFittingId > 0
+        ? { type: "doctrine_coverage", doctrine_id: c.doctrineId, fitting_id: c.doctrineFittingId, level: c.fittingLevel }
+        : { type: "doctrine_coverage", doctrine_id: c.doctrineId, min_required_pct: c.minPct };
     case "skill":
       return { type: "skill", skill_id: c.skillId, min_level: c.minSkillLevel };
     case "total_sp":
@@ -101,6 +105,7 @@ function fromConditionNode(
     fittingId: Number(node.fitting_id ?? base.fittingId),
     fittingLevel: node.level === "recommended" ? "recommended" : "minimum",
     doctrineId: Number(node.doctrine_id ?? base.doctrineId),
+    doctrineFittingId: Number(node.fitting_id ?? 0),
     minPct: Number(node.min_required_pct ?? base.minPct),
     skillId: Number(node.skill_id ?? base.skillId),
     minSkillLevel: Number(node.min_level ?? base.minSkillLevel),
@@ -435,46 +440,86 @@ export function RulesView({
                     </div>
                   )}
 
-                  {cond.type === "doctrine_coverage" && (
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      <div className="space-y-1 sm:col-span-2">
-                        <label className="text-xs text-muted-foreground">Doctrine</label>
-                        <Input
-                          placeholder="Search doctrine..."
-                          value={doctrineQuery}
-                          onChange={(e) => setDoctrineQuery(e.target.value)}
-                          className="h-8 text-xs"
-                        />
-                        <select
-                          value={cond.doctrineId}
-                          onChange={(e) => updateCond(idx, { doctrineId: Number(e.target.value) })}
-                          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                        >
-                          {doctrines
-                            .filter((d) => {
-                              const q = doctrineQuery.trim().toLowerCase();
-                              return !q || d.name.toLowerCase().includes(q);
-                            })
-                            .map((d) => (
-                              <option key={d.id} value={d.id}>
-                                {d.name}
-                              </option>
-                            ))}
-                          {!doctrines.length && <option value={0}>No doctrines available</option>}
-                        </select>
+                  {cond.type === "doctrine_coverage" && (() => {
+                    const selectedDoc = doctrines.find((d) => d.id === cond.doctrineId);
+                    const docFittings = selectedDoc?.fittings ?? [];
+                    return (
+                      <div className="space-y-2">
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground">Doctrine</label>
+                            <Input
+                              placeholder="Search doctrine..."
+                              value={doctrineQuery}
+                              onChange={(e) => setDoctrineQuery(e.target.value)}
+                              className="h-8 text-xs"
+                            />
+                            <select
+                              value={cond.doctrineId}
+                              onChange={(e) =>
+                                updateCond(idx, { doctrineId: Number(e.target.value), doctrineFittingId: 0 })
+                              }
+                              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                            >
+                              {doctrines
+                                .filter((d) => {
+                                  const q = doctrineQuery.trim().toLowerCase();
+                                  return !q || d.name.toLowerCase().includes(q);
+                                })
+                                .map((d) => (
+                                  <option key={d.id} value={d.id}>
+                                    {d.name}
+                                  </option>
+                                ))}
+                              {!doctrines.length && <option value={0}>No doctrines available</option>}
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground">Doctrine scope (All or specific fit)</label>
+                            <select
+                              value={cond.doctrineFittingId}
+                              onChange={(e) => updateCond(idx, { doctrineFittingId: Number(e.target.value) })}
+                              className="mt-9 h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                            >
+                              <option value={0}>All required fittings (%)</option>
+                              {docFittings.map((df) => (
+                                <option key={df.id} value={df.id}>
+                                  {df.ship_type_name} — {df.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        {cond.doctrineFittingId > 0 ? (
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground">Skill target</label>
+                            <select
+                              value={cond.fittingLevel}
+                              onChange={(e) =>
+                                updateCond(idx, { fittingLevel: e.target.value as "minimum" | "recommended" })
+                              }
+                              className="h-9 w-48 rounded-md border border-input bg-background px-3 text-sm"
+                            >
+                              <option value="minimum">Minimum</option>
+                              <option value="recommended">Recommended</option>
+                            </select>
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            <label className="text-xs text-muted-foreground">Required coverage (%)</label>
+                            <Input
+                              type="number"
+                              min={1}
+                              max={100}
+                              value={cond.minPct}
+                              onChange={(e) => updateCond(idx, { minPct: Number(e.target.value) })}
+                              className="w-32"
+                            />
+                          </div>
+                        )}
                       </div>
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Required coverage (%)</label>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={100}
-                          value={cond.minPct}
-                          onChange={(e) => updateCond(idx, { minPct: Number(e.target.value) })}
-                        />
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {cond.type === "skill" && (
                     <div className="grid gap-2 sm:grid-cols-3">
