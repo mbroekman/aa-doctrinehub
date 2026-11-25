@@ -8,6 +8,13 @@ import type { Doctrine, FittingSummary, HangarShipMatch, IndustryOrderResult, Sr
 
 type HangarSortKey = "ship" | "doctrine" | "location" | "match";
 
+function matchBadgeClass(pct: number): string {
+  if (pct >= 100) return "bg-emerald-600 text-white";
+  if (pct >= 80) return "bg-amber-500 text-black";
+  if (pct >= 50) return "bg-orange-600 text-white";
+  return "bg-destructive text-destructive-foreground";
+}
+
 export function IntegrationsView({
   doctrines,
   fittings,
@@ -164,7 +171,12 @@ export function IntegrationsView({
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          {groupedByCharacter.length ? (
+          {loadingHangars ? (
+            <div className="flex items-center justify-center gap-3 rounded-md border border-border bg-muted/30 p-8 text-sm text-muted-foreground">
+              <RefreshCw className="h-5 w-5 animate-spin" />
+              <span>Loading hangar ships and resolving station/structure names, please wait...</span>
+            </div>
+          ) : groupedByCharacter.length ? (
             groupedByCharacter.map(([charName, charShips]) => (
               <div key={charName} className="rounded-md border border-border p-3">
                 <div className="mb-2 flex items-center justify-between">
@@ -209,7 +221,7 @@ export function IntegrationsView({
                           </td>
                           <td className="py-1.5 pr-3 text-xs text-muted-foreground">{s.location_name}</td>
                           <td className="py-1.5 text-right">
-                            <Badge variant={s.match_pct === 100 ? "default" : "secondary"}>
+                            <Badge className={matchBadgeClass(s.match_pct)}>
                               {s.match_pct === 100 ? "100% Full" : `${s.match_pct}% (${s.match_status})`}
                             </Badge>
                           </td>
@@ -299,7 +311,9 @@ export function IntegrationsView({
                   <Badge variant={srpResult.hull_match ? "default" : "destructive"}>
                     {srpResult.hull_match ? "Hull matches" : "Wrong hull"}
                   </Badge>
-                  <span className="font-medium">{srpResult.compliance_pct}% module match</span>
+                  <Badge className={matchBadgeClass(srpResult.compliance_pct)}>
+                    {srpResult.compliance_pct}% module match
+                  </Badge>
                 </div>
                 {srpResult.missing.length > 0 && (
                   <p className="text-destructive">
