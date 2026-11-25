@@ -29,6 +29,7 @@ export function SyncSettingsView() {
   const [confirmPurge, setConfirmPurge] = useState(false);
   const [purgeBusy, setPurgeBusy] = useState(false);
   const [purgeResult, setPurgeResult] = useState<RemoteScrapePurgeResult | null>(null);
+  const [scrapeLogs, setScrapeLogs] = useState<string[]>([]);
 
   useEffect(() => {
     api.syncSettings().then(setSettings).catch((e: Error) => setError(e.message));
@@ -61,9 +62,11 @@ export function SyncSettingsView() {
     setScrapeModeBusy(mode);
     setScrapeError("");
     setPurgeResult(null);
+    setScrapeLogs([]);
     if (mode === "preview") {
       setScrapeResult(null);
     }
+    const appendLog = (msg: string) => setScrapeLogs((prev) => [...prev, msg]);
     try {
       const parsedLimit = batchLimit.trim() ? Number(batchLimit.trim()) : null;
       const parsedOffset = Math.max(0, Number(batchOffset.trim() || "0") || 0);
@@ -77,9 +80,9 @@ export function SyncSettingsView() {
         overwrite_existing: overwriteExisting,
       };
       if (mode === "preview") {
-        setScrapePreview(await api.remoteScrapePreview(payload));
+        setScrapePreview(await api.remoteScrapePreview(payload, appendLog));
       } else {
-        const res = await api.remoteScrapeImport(payload);
+        const res = await api.remoteScrapeImport(payload, appendLog);
         setScrapeResult(res);
         setScrapePreview(null);
         if (overwriteExisting && payload.limit && (res.doctrines.length > 0 || res.fittings_created + res.fittings_updated > 0)) {
@@ -400,6 +403,14 @@ export function SyncSettingsView() {
                   ))}
                 </ul>
               )}
+            </div>
+          )}
+          {scrapeLogs.length > 0 && (
+            <div className="rounded-md border bg-muted/30 p-3 space-y-1">
+              <div className="text-xs font-medium text-muted-foreground">Live log</div>
+              <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap font-mono text-xs leading-relaxed">
+                {scrapeLogs.join("\n")}
+              </pre>
             </div>
           )}
           {scrapeError && <p className="text-destructive">{scrapeError}</p>}

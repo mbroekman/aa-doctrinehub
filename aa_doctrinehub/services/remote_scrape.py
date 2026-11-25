@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable, Iterator
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -264,7 +265,7 @@ def _scrape_category(
     )
 
 
-def scrape_remote_fittings_site(
+def iter_scrape_remote_fittings_site(
     base_url: str,
     sessionid: str,
     *,
@@ -275,18 +276,24 @@ def scrape_remote_fittings_site(
     skip_existing: bool = False,
     timeout: int = 15,
     request_delay: float = 0.05,
-) -> SourceSnapshot:
-    """Scrape doctrines, fittings, and categories from an external Alliance Auth."""
+) -> Iterator[tuple[str, Any]]:
+    """Yield ``("log", message)`` events and finally ``("snapshot", SourceSnapshot)``."""
     normalized = normalize_base_url(base_url)
+    yield ("log", f"Connecting to {normalized}...")
     session = make_remote_session(normalized, sessionid)
 
     # Verify session and collect standalone fits if requested.
+    yield ("log", "Checking session & reading fittings index (/fittings/fit/all/)...")
     fits_soup = _get_html(session, urljoin(normalized, "/fittings/fit/all/"), timeout=timeout)
     fit_links: dict[int, str] = _extract_links(fits_soup, FIT_DETAIL_RE) if include_standalone_fits else {}
+    if include_standalone_fits:
+        yield ("log", f"Found {len(fit_links)} fittings on source.")
 
     # Collect doctrine links from the Fittings index.
+    yield ("log", "Reading doctrines index (/fittings/)...")
     index_soup = _get_html(session, urljoin(normalized, "/fittings/"), timeout=timeout)
     doctrine_links = _extract_links(index_soup, DOCTRINE_DETAIL_RE)
+    yield ("log", f"Found {len(doctrine_links)} doctrines on source.")
 
     existing_doc_ids: set[int] = set()
     existing_fit_ids: set[int] = set()
@@ -315,7 +322,8 @@ def scrape_remote_fittings_site(
     snapshot = SourceSnapshot()
     doctrine_fit_ids: list[int] = []
     seen_doc_fit_ids: set[int] = set()
-    for doctrine_id, d_name in doc_items:
+    for idx, (doctrine_id, d_name) in enumerate(doc_items, start=1):
+        yield ("log", f"[Doctrine {idx}/{len(doc_items)}] Scraping {d_name or doctrine_id}...")
         if request_delay > 0:
             time.sleep(request_delay)
         doctrine = _scrape_doctrine(session, normalized, doctrine_id, d_name, timeout=timeout)
@@ -341,7 +349,9 @@ def scrape_remote_fittings_site(
     else:
         standalone_fit_items = standalone_fit_items[start:]
 
-    for fit_id, f_name in [*required_fit_items, *standalone_fit_items]:
+    all_fit_items = [*required_fit_items, *standalone_fit_items]
+    for idx, (fit_id, f_name) in enumerate(all_fit_items, start=1):
+        yield ("log", f"[Fitting {idx}/{len(all_fit_items)}] Scraping {f_name or fit_id}...")
         if request_delay > 0:
             time.sleep(request_delay)
         fitting = _scrape_fitting(session, normalized, fit_id, f_name, timeout=timeout)
@@ -349,6 +359,7 @@ def scrape_remote_fittings_site(
             snapshot.fittings.append(fitting)
 
     if include_categories:
+        yield ("log", "Reading categories index (/fittings/cat/all/)...")
         cats_soup = _get_html(session, urljoin(normalized, "/fittings/cat/all/"), timeout=timeout)
         cat_links = _extract_links(cats_soup, CAT_DETAIL_RE)
         cat_items = [(cid, name) for cid, name in cat_links.items() if cid not in existing_cat_ids]
@@ -356,13 +367,47 @@ def scrape_remote_fittings_site(
             cat_items = cat_items[start : start + limit]
         else:
             cat_items = cat_items[start:]
-        for cat_id, c_name in cat_items:
+        for idx, (cat_id, c_name) in enumerate(cat_items, start=1):
+            yield ("log", f"[Category {idx}/{len(cat_items)}] Scraping {c_name or cat_id}...")
             if request_delay > 0:
                 time.sleep(request_delay)
             snapshot.categories.append(
                 _scrape_category(session, normalized, cat_id, c_name, timeout=timeout)
             )
 
+    yield ("snapshot", snapshot)
+
+
+def scrape_remote_fittings_site(
+    base_url: str,
+    sessionid: str,
+    *,
+    include_standalone_fits: bool = True,
+    include_categories: bool = True,
+    limit: int | None = None,
+    offset: int = 0,
+    skip_existing: bool = False,
+    timeout: int = 15,
+    request_delay: float = 0.05,
+    on_progress: Callable[[str], None] | None = None,
+) -> SourceSnapshot:
+    """Scrape doctrines, fittings, and categories from an external Alliance Auth."""
+    snapshot = SourceSnapshot()
+    for kind, payload in iter_scrape_remote_fittings_site(
+        base_url,
+        sessionid,
+        include_standalone_fits=include_standalone_fits,
+        include_categories=include_categories,
+        limit=limit,
+        offset=offset,
+        skip_existing=skip_existing,
+        timeout=timeout,
+        request_delay=request_delay,
+    ):
+        if kind == "log" and on_progress is not None:
+            on_progress(str(payload))
+        elif kind == "snapshot":
+            snapshot = payload
     return snapshot
 
 
@@ -415,21 +460,34 @@ def preview_remote_fittings_site(
     offset: int = 0,
     skip_existing: bool = False,
     timeout: int = 15,
+    on_progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Fast index-only preview of doctrines, fittings, and categories on an external Auth."""
+    def _log(msg: str) -> None:
+        if on_progress is not None:
+            on_progress(msg)
+
     normalized = normalize_base_url(base_url)
+    _log(f"Connecting to {normalized}...")
     session = make_remote_session(normalized, sessionid)
 
+    _log("Reading fittings index (/fittings/fit/all/)...")
     fits_soup = _get_html(session, urljoin(normalized, "/fittings/fit/all/"), timeout=timeout)
     fit_links = _extract_links(fits_soup, FIT_DETAIL_RE) if include_standalone_fits else {}
 
+    _log("Reading doctrines index (/fittings/)...")
     index_soup = _get_html(session, urljoin(normalized, "/fittings/"), timeout=timeout)
     doctrine_links = _extract_links(index_soup, DOCTRINE_DETAIL_RE)
 
     cat_links: dict[int, str] = {}
     if include_categories:
+        _log("Reading categories index (/fittings/cat/all/)...")
         cats_soup = _get_html(session, urljoin(normalized, "/fittings/cat/all/"), timeout=timeout)
         cat_links = _extract_links(cats_soup, CAT_DETAIL_RE)
+
+    _log(
+        f"Index summary: {len(doctrine_links)} doctrines, {len(fit_links)} fittings, {len(cat_links)} categories."
+    )
 
     existing_doc_ids = {
         int(x)

@@ -305,3 +305,37 @@ def test_batched_scrape_with_offset_advances_through_existing_items():
     assert len(snap2.doctrines) == 0
     assert [f.external_id for f in snap2.fittings] == [102]
     assert Doctrine.objects.from_source(Source.REMOTE_AUTH).count() == 1
+
+
+def test_remote_scrape_streaming_ndjson_emits_log_and_result(client):
+    import json
+
+    from allianceauth.tests.auth_utils import AuthUtils
+
+    user = AuthUtils.create_user("mgr_stream")
+    AuthUtils.add_main_character(user, "Mgr Stream", character_id=92101)
+    AuthUtils.add_permission_to_user_by_name("aa_doctrinehub.manage_doctrines", user)
+    client.force_login(user)
+
+    base = "https://other.example"
+    pages = {
+        f"{base}/fittings/fit/all/": _FakeResp(FITS_LIST_HTML, f"{base}/fittings/fit/all/"),
+        f"{base}/fittings/": _FakeResp(INDEX_HTML, f"{base}/fittings/"),
+        f"{base}/fittings/doctrine/11/": _FakeResp(DOCTRINE_HTML, f"{base}/fittings/doctrine/11/"),
+        f"{base}/fittings/fit/101/": _FakeResp(FIT_101_HTML, f"{base}/fittings/fit/101/"),
+        f"{base}/fittings/fit/102/": _FakeResp(FIT_102_HTML, f"{base}/fittings/fit/102/"),
+        f"{base}/fittings/cat/all/": _FakeResp(CATS_LIST_HTML, f"{base}/fittings/cat/all/"),
+        f"{base}/fittings/cat/7/": _FakeResp(CAT_7_HTML, f"{base}/fittings/cat/7/"),
+    }
+    url = reverse("aa_doctrinehub:api_remote_scrape")
+    with patch("requests.Session.get", new=_fake_get_factory(pages)):
+        resp = client.post(
+            url,
+            data={"base_url": base, "sessionid": "abc", "mode": "import", "stream": True},
+            content_type="application/json",
+        )
+        lines = [json.loads(line) for line in b"".join(resp.streaming_content).decode().splitlines() if line]
+    assert resp.status_code == 200
+    assert any(e["type"] == "log" for e in lines)
+    assert lines[-1]["type"] == "result"
+    assert lines[-1]["data"]["doctrines_created"] == 1

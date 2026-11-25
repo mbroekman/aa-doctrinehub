@@ -8,7 +8,7 @@ from typing import Any, cast
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import User
 from django.db.models import Prefetch
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
@@ -204,13 +204,14 @@ def run_fittings_sync(request: HttpRequest) -> JsonResponse:
 @login_required
 @permission_required("aa_doctrinehub.manage_doctrines")
 @require_POST
-def remote_scrape(request: HttpRequest) -> JsonResponse:
+def remote_scrape(request: HttpRequest) -> HttpResponse:
     """Preview or import doctrines, fittings, and categories from an external Auth."""
+    from .models import Doctrine as DoctrineModel, Source as SourceChoices
     from .services.remote_scrape import (
         RemoteScrapeError,
         import_remote_scrape,
+        iter_scrape_remote_fittings_site,
         preview_remote_fittings_site,
-        scrape_remote_fittings_site,
     )
 
     body = _json_body(request)
@@ -244,37 +245,8 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
     if offset < 0:
         return JsonResponse({"error": "offset must be at least 0"}, status=400)
 
-    try:
-        if mode == "preview":
-            return JsonResponse(
-                preview_remote_fittings_site(
-                    base_url,
-                    sessionid,
-                    include_standalone_fits=include_standalone_fits,
-                    include_categories=include_categories,
-                    limit=limit,
-                    offset=offset,
-                    skip_existing=skip_existing,
-                )
-            )
-        snapshot = scrape_remote_fittings_site(
-            base_url,
-            sessionid,
-            include_standalone_fits=include_standalone_fits,
-            include_categories=include_categories,
-            limit=limit,
-            offset=offset,
-            skip_existing=skip_existing,
-        )
-    except RemoteScrapeError as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
-
-    prune_missing = limit is None and offset == 0 and not skip_existing
-    result = import_remote_scrape(snapshot, prune_missing=prune_missing)
-    from .models import Doctrine as DoctrineModel, Source as SourceChoices
-
-    return JsonResponse(
-        {
+    def _build_import_payload(snapshot, result) -> dict[str, Any]:
+        return {
             "mode": "import",
             "summary": result.summary(),
             "fittings_created": result.fittings_created,
@@ -296,7 +268,95 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
                 for d in snapshot.doctrines
             ],
         }
-    )
+
+    def _iter_events():
+        try:
+            if mode == "preview":
+                logs: list[str] = []
+                data = preview_remote_fittings_site(
+                    base_url,
+                    sessionid,
+                    include_standalone_fits=include_standalone_fits,
+                    include_categories=include_categories,
+                    limit=limit,
+                    offset=offset,
+                    skip_existing=skip_existing,
+                    on_progress=logs.append,
+                )
+                for msg in logs:
+                    yield json.dumps({"type": "log", "message": msg}) + "\n"
+                yield json.dumps({"type": "result", "data": data}) + "\n"
+                return
+
+            snapshot = None
+            for kind, payload in iter_scrape_remote_fittings_site(
+                base_url,
+                sessionid,
+                include_standalone_fits=include_standalone_fits,
+                include_categories=include_categories,
+                limit=limit,
+                offset=offset,
+                skip_existing=skip_existing,
+            ):
+                if kind == "log":
+                    yield json.dumps({"type": "log", "message": str(payload)}) + "\n"
+                elif kind == "snapshot":
+                    snapshot = payload
+
+            assert snapshot is not None
+            yield json.dumps(
+                {
+                    "type": "log",
+                    "message": (
+                        f"Saving {len(snapshot.doctrines)} doctrines, {len(snapshot.fittings)} fittings, "
+                        f"and {len(snapshot.categories)} categories..."
+                    ),
+                }
+            ) + "\n"
+            prune_missing = limit is None and offset == 0 and not skip_existing
+            result = import_remote_scrape(snapshot, prune_missing=prune_missing)
+            yield json.dumps({"type": "log", "message": f"Done: {result.summary()}"}) + "\n"
+            yield json.dumps({"type": "result", "data": _build_import_payload(snapshot, result)}) + "\n"
+        except RemoteScrapeError as exc:
+            yield json.dumps({"type": "error", "error": str(exc)}) + "\n"
+
+    if bool(body.get("stream")):
+        response = StreamingHttpResponse(_iter_events(), content_type="application/x-ndjson")
+        response["X-Accel-Buffering"] = "no"
+        response["Cache-Control"] = "no-cache"
+        return response
+
+    try:
+        if mode == "preview":
+            return JsonResponse(
+                preview_remote_fittings_site(
+                    base_url,
+                    sessionid,
+                    include_standalone_fits=include_standalone_fits,
+                    include_categories=include_categories,
+                    limit=limit,
+                    offset=offset,
+                    skip_existing=skip_existing,
+                )
+            )
+        snapshot = None
+        for kind, payload in iter_scrape_remote_fittings_site(
+            base_url,
+            sessionid,
+            include_standalone_fits=include_standalone_fits,
+            include_categories=include_categories,
+            limit=limit,
+            offset=offset,
+            skip_existing=skip_existing,
+        ):
+            if kind == "snapshot":
+                snapshot = payload
+        assert snapshot is not None
+        prune_missing = limit is None and offset == 0 and not skip_existing
+        result = import_remote_scrape(snapshot, prune_missing=prune_missing)
+        return JsonResponse(_build_import_payload(snapshot, result))
+    except RemoteScrapeError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
 
 
 @login_required
