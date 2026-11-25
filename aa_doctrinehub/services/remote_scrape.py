@@ -360,6 +360,105 @@ def preview_remote_scrape(snapshot: SourceSnapshot) -> dict[str, Any]:
     }
 
 
+def preview_remote_fittings_site(
+    base_url: str,
+    sessionid: str,
+    *,
+    include_standalone_fits: bool = True,
+    include_categories: bool = True,
+    limit: int | None = None,
+    skip_existing: bool = False,
+    timeout: int = 15,
+) -> dict[str, Any]:
+    """Fast index-only preview of doctrines, fittings, and categories on an external Auth."""
+    normalized = normalize_base_url(base_url)
+    session = make_remote_session(normalized, sessionid)
+
+    fits_soup = _get_html(session, urljoin(normalized, "/fittings/fit/all/"), timeout=timeout)
+    fit_links = _extract_links(fits_soup, FIT_DETAIL_RE) if include_standalone_fits else {}
+
+    index_soup = _get_html(session, urljoin(normalized, "/fittings/"), timeout=timeout)
+    doctrine_links = _extract_links(index_soup, DOCTRINE_DETAIL_RE)
+
+    cat_links: dict[int, str] = {}
+    if include_categories:
+        cats_soup = _get_html(session, urljoin(normalized, "/fittings/cat/all/"), timeout=timeout)
+        cat_links = _extract_links(cats_soup, CAT_DETAIL_RE)
+
+    existing_doc_ids = {
+        int(x)
+        for x in Doctrine.objects.from_source(Source.REMOTE_AUTH).values_list("external_id", flat=True)
+        if x is not None
+    }
+    existing_fit_ids = {
+        int(x)
+        for x in Fitting.objects.from_source(Source.REMOTE_AUTH).values_list("external_id", flat=True)
+        if x is not None
+    }
+    existing_cat_ids = {
+        int(x)
+        for x in Category.objects.from_source(Source.REMOTE_AUTH).values_list("external_id", flat=True)
+        if x is not None
+    }
+
+    doc_candidates = [
+        (did, name)
+        for did, name in doctrine_links.items()
+        if not (skip_existing and did in existing_doc_ids)
+    ]
+    fit_candidates = [
+        (fid, name)
+        for fid, name in fit_links.items()
+        if not (skip_existing and fid in existing_fit_ids)
+    ]
+    cat_candidates = [
+        (cid, name)
+        for cid, name in cat_links.items()
+        if not (skip_existing and cid in existing_cat_ids)
+    ]
+
+    if limit is not None and limit > 0:
+        doc_batch = doc_candidates[:limit]
+        fit_batch = fit_candidates[:limit]
+        cat_batch = cat_candidates[:limit]
+    else:
+        doc_batch = doc_candidates
+        fit_batch = fit_candidates
+        cat_batch = cat_candidates
+
+    doctrines_new = sum(1 for did, _ in doc_batch if did not in existing_doc_ids)
+    fittings_new = sum(1 for fid, _ in fit_batch if fid not in existing_fit_ids)
+    categories_new = sum(1 for cid, _ in cat_batch if cid not in existing_cat_ids)
+
+    return {
+        "mode": "preview",
+        "doctrines_total": len(doctrine_links),
+        "doctrines_already_imported": sum(1 for did in doctrine_links if did in existing_doc_ids),
+        "doctrines_count": len(doc_batch),
+        "doctrines_new": doctrines_new,
+        "doctrines_existing": len(doc_batch) - doctrines_new,
+        "fittings_total": len(fit_links),
+        "fittings_already_imported": sum(1 for fid in fit_links if fid in existing_fit_ids),
+        "fittings_count": len(fit_batch),
+        "fittings_new": fittings_new,
+        "fittings_existing": len(fit_batch) - fittings_new,
+        "categories_total": len(cat_links),
+        "categories_already_imported": sum(1 for cid in cat_links if cid in existing_cat_ids),
+        "categories_count": len(cat_batch),
+        "categories_new": categories_new,
+        "categories_existing": len(cat_batch) - categories_new,
+        "doctrines": [
+            {
+                "external_id": did,
+                "name": name or f"Doctrine {did}",
+                "fittings_count": None,
+                "is_new": did not in existing_doc_ids,
+            }
+            for did, name in doc_batch
+        ],
+    }
+
+
 def import_remote_scrape(snapshot: SourceSnapshot, *, prune_missing: bool = True) -> SyncResult:
     """Apply ``snapshot`` as read-only ``Source.REMOTE_AUTH`` records."""
     return apply_snapshot(

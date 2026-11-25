@@ -67,19 +67,25 @@ export interface SyncSettings {
 
 export interface RemoteScrapePreview {
   mode: "preview";
+  doctrines_total: number;
+  doctrines_already_imported: number;
   doctrines_count: number;
   doctrines_new: number;
   doctrines_existing: number;
+  fittings_total: number;
+  fittings_already_imported: number;
   fittings_count: number;
   fittings_new: number;
   fittings_existing: number;
+  categories_total: number;
+  categories_already_imported: number;
   categories_count: number;
   categories_new: number;
   categories_existing: number;
   doctrines: {
     external_id: number;
     name: string;
-    fittings_count: number;
+    fittings_count: number | null;
     is_new: boolean;
   }[];
 }

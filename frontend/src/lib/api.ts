@@ -38,7 +38,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       ...(init.headers || {}),
     },
   });
-  const data = await response.json().catch(() => ({}));
+  const text = await response.text();
+  let data: Record<string, unknown> = {};
+  if (text) {
+    try {
+      data = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new Error(`Unexpected response from server (HTTP ${response.status}).`);
+    }
+  }
   if (!response.ok) {
     throw new Error((data as { error?: string }).error || `Request failed (${response.status})`);
   }

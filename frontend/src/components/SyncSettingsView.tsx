@@ -16,7 +16,7 @@ export function SyncSettingsView() {
   const [includeCategories, setIncludeCategories] = useState(true);
   const [batchLimit, setBatchLimit] = useState("25");
   const [skipExisting, setSkipExisting] = useState(true);
-  const [scrapeBusy, setScrapeBusy] = useState(false);
+  const [scrapeModeBusy, setScrapeModeBusy] = useState<"preview" | "import" | null>(null);
   const [scrapeError, setScrapeError] = useState("");
   const [scrapePreview, setScrapePreview] = useState<RemoteScrapePreview | null>(null);
   const [scrapeResult, setScrapeResult] = useState<RemoteScrapeImportResult | null>(null);
@@ -49,7 +49,7 @@ export function SyncSettingsView() {
   };
 
   const runScrape = async (mode: "preview" | "import") => {
-    setScrapeBusy(true);
+    setScrapeModeBusy(mode);
     setScrapeError("");
     if (mode === "preview") {
       setScrapeResult(null);
@@ -72,7 +72,7 @@ export function SyncSettingsView() {
     } catch (e) {
       setScrapeError((e as Error).message);
     } finally {
-      setScrapeBusy(false);
+      setScrapeModeBusy(null);
     }
   };
 
@@ -203,31 +203,69 @@ export function SyncSettingsView() {
             <Button
               size="sm"
               variant="outline"
-              disabled={scrapeBusy || !remoteUrl.trim() || !remoteSessionId.trim()}
+              disabled={scrapeModeBusy !== null || !remoteUrl.trim() || !remoteSessionId.trim()}
               onClick={() => void runScrape("preview")}
             >
-              Preview
+              {scrapeModeBusy === "preview" ? "Previewing..." : "Preview"}
             </Button>
             <Button
               size="sm"
-              disabled={scrapeBusy || !remoteUrl.trim() || !remoteSessionId.trim()}
+              disabled={scrapeModeBusy !== null || !remoteUrl.trim() || !remoteSessionId.trim()}
               onClick={() => void runScrape("import")}
             >
-              Import now
+              {scrapeModeBusy === "import" ? "Importing..." : "Import now"}
             </Button>
+            {scrapeModeBusy === "preview" && (
+              <span className="text-xs text-muted-foreground">Reading index pages from external Auth...</span>
+            )}
+            {scrapeModeBusy === "import" && (
+              <span className="text-xs text-muted-foreground">
+                Scraping and importing batch (this may take a moment)...
+              </span>
+            )}
           </div>
           {scrapePreview && (
             <div className="rounded-md border p-3 space-y-2">
-              <div className="font-medium">
-                Preview: {scrapePreview.doctrines_count} doctrines ({scrapePreview.doctrines_new} new),{" "}
-                {scrapePreview.fittings_count} fittings ({scrapePreview.fittings_new} new),{" "}
-                {scrapePreview.categories_count} categories ({scrapePreview.categories_new} new).
+              <div className="font-medium">Preview summary</div>
+              <div className="grid gap-2 sm:grid-cols-3 text-xs">
+                <div className="rounded border p-2">
+                  <div className="font-medium">Doctrines</div>
+                  <div className="text-muted-foreground">
+                    Source total: {scrapePreview.doctrines_total} (already imported:{" "}
+                    {scrapePreview.doctrines_already_imported})
+                  </div>
+                  <div>
+                    Next batch: {scrapePreview.doctrines_count} ({scrapePreview.doctrines_new} new)
+                  </div>
+                </div>
+                <div className="rounded border p-2">
+                  <div className="font-medium">Fittings</div>
+                  <div className="text-muted-foreground">
+                    Source total: {scrapePreview.fittings_total} (already imported:{" "}
+                    {scrapePreview.fittings_already_imported})
+                  </div>
+                  <div>
+                    Next batch: {scrapePreview.fittings_count} ({scrapePreview.fittings_new} new)
+                  </div>
+                </div>
+                <div className="rounded border p-2">
+                  <div className="font-medium">Categories</div>
+                  <div className="text-muted-foreground">
+                    Source total: {scrapePreview.categories_total} (already imported:{" "}
+                    {scrapePreview.categories_already_imported})
+                  </div>
+                  <div>
+                    Next batch: {scrapePreview.categories_count} ({scrapePreview.categories_new} new)
+                  </div>
+                </div>
               </div>
               {scrapePreview.doctrines.length > 0 && (
                 <ul className="list-disc pl-5 text-xs text-muted-foreground space-y-0.5 max-h-40 overflow-y-auto">
                   {scrapePreview.doctrines.map((d) => (
                     <li key={d.external_id}>
-                      {d.name} ({d.fittings_count} fits){d.is_new ? " — new" : ""}
+                      {d.name}
+                      {d.fittings_count !== null ? ` (${d.fittings_count} fits)` : ""}
+                      {d.is_new ? " — new" : ""}
                     </li>
                   ))}
                 </ul>

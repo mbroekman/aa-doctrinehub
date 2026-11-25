@@ -193,7 +193,11 @@ def test_remote_scrape_api_endpoint_requires_permission_and_imports(client):
             content_type="application/json",
         )
         assert resp_prev.status_code == 200
-        assert resp_prev.json()["doctrines_count"] == 1
+        prev_data = resp_prev.json()
+        assert prev_data["doctrines_total"] == 1
+        assert prev_data["doctrines_count"] == 1
+        assert prev_data["fittings_total"] == 2
+        assert prev_data["categories_total"] == 1
 
         resp_imp = client.post(
             url,

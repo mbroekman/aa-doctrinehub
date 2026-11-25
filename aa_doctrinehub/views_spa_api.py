@@ -209,7 +209,7 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
     from .services.remote_scrape import (
         RemoteScrapeError,
         import_remote_scrape,
-        preview_remote_scrape,
+        preview_remote_fittings_site,
         scrape_remote_fittings_site,
     )
 
@@ -234,6 +234,17 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
             return JsonResponse({"error": "limit must be at least 1"}, status=400)
 
     try:
+        if mode == "preview":
+            return JsonResponse(
+                preview_remote_fittings_site(
+                    base_url,
+                    sessionid,
+                    include_standalone_fits=include_standalone_fits,
+                    include_categories=include_categories,
+                    limit=limit,
+                    skip_existing=skip_existing,
+                )
+            )
         snapshot = scrape_remote_fittings_site(
             base_url,
             sessionid,
@@ -244,9 +255,6 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
         )
     except RemoteScrapeError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
-
-    if mode == "preview":
-        return JsonResponse(preview_remote_scrape(snapshot))
 
     prune_missing = limit is None and not skip_existing
     result = import_remote_scrape(snapshot, prune_missing=prune_missing)
