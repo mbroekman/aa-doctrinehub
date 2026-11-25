@@ -1,4 +1,4 @@
-export type Source = "local" | "fittings";
+export type Source = "local" | "fittings" | "remote_auth";
 
 export interface CategoryRef {
   id: number;
@@ -63,4 +63,35 @@ export interface SyncSettings {
   fittings_sync_interval_days: number;
   fittings_last_sync_at: string | null;
   fittings_last_sync_summary: string;
+}
+
+export interface RemoteScrapePreview {
+  mode: "preview";
+  doctrines_count: number;
+  doctrines_new: number;
+  doctrines_existing: number;
+  fittings_count: number;
+  fittings_new: number;
+  fittings_existing: number;
+  categories_count: number;
+  categories_new: number;
+  categories_existing: number;
+  doctrines: {
+    external_id: number;
+    name: string;
+    fittings_count: number;
+    is_new: boolean;
+  }[];
+}
+
+export interface RemoteScrapeImportResult {
+  mode: "import";
+  summary: string;
+  fittings_created: number;
+  fittings_updated: number;
+  fittings_removed: number;
+  doctrines_created: number;
+  doctrines_updated: number;
+  doctrines_archived: number;
+  categories_synced: number;
 }

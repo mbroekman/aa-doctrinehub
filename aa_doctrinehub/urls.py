@@ -14,6 +14,7 @@ urlpatterns = [
     path("api/v1/fittings/<int:fitting_id>/", views_spa_api.fitting_detail, name="api_fitting_detail"),
     path("api/v1/settings/sync/", views_spa_api.sync_settings, name="api_sync_settings"),
     path("api/v1/settings/sync/run/", views_spa_api.run_fittings_sync, name="api_run_fittings_sync"),
+    path("api/v1/settings/remote-scrape/", views_spa_api.remote_scrape, name="api_remote_scrape"),
     # The SPA handles its own routes below the index.
     path("<path:spa_path>", views.index, name="spa"),
 ]

@@ -183,37 +183,44 @@ def _items_signature(items: list[tuple[str, str, int]]) -> list[tuple[str, str, 
     return sorted(items)
 
 
-def _sync_fitting(source: SourceFitting, now: Any, result: SyncResult) -> Fitting:
+def _sync_fitting(
+    source_item: SourceFitting,
+    now: Any,
+    result: SyncResult,
+    *,
+    source: str = Source.FITTINGS,
+    change_note: str = "Synced from Fittings",
+) -> Fitting:
     fitting, created = Fitting.objects.get_or_create(
-        source=Source.FITTINGS,
-        external_id=source.external_id,
-        defaults={"name": source.name, "ship_type_name": source.ship_type_name},
+        source=source,
+        external_id=source_item.external_id,
+        defaults={"name": source_item.name, "ship_type_name": source_item.ship_type_name},
     )
-    fitting.name = source.name
-    fitting.description = source.description
-    fitting.ship_type_id = source.ship_type_id
-    fitting.ship_type_name = source.ship_type_name
+    fitting.name = source_item.name
+    fitting.description = source_item.description
+    fitting.ship_type_id = source_item.ship_type_id
+    fitting.ship_type_name = source_item.ship_type_name
     fitting.last_synced_at = now
     fitting.save()
 
     current = fitting.current_version
-    new_signature = _items_signature([(i.flag, i.type_name, i.quantity) for i in source.items])
+    new_signature = _items_signature([(i.flag, i.type_name, i.quantity) for i in source_item.items])
     old_signature = (
         _items_signature([(i.flag, i.type_name, i.quantity) for i in current.items.all()]) if current else None
     )
     if new_signature != old_signature:
         parsed = ParsedFitting(
-            ship_type_name=source.ship_type_name,
-            name=source.name,
-            items=[ParsedItem(flag=i.flag, type_name=i.type_name, quantity=i.quantity) for i in source.items],
+            ship_type_name=source_item.ship_type_name,
+            name=source_item.name,
+            items=[ParsedItem(flag=i.flag, type_name=i.type_name, quantity=i.quantity) for i in source_item.items],
         )
-        eft = source.eft.strip() or to_eft(
-            source.ship_type_name,
-            source.name,
-            [ExportItem(flag=i.flag, type_name=i.type_name, quantity=i.quantity) for i in source.items],
+        eft = source_item.eft.strip() or to_eft(
+            source_item.ship_type_name,
+            source_item.name,
+            [ExportItem(flag=i.flag, type_name=i.type_name, quantity=i.quantity) for i in source_item.items],
         )
-        version = add_version(fitting, parsed, eft, change_note="Synced from Fittings")
-        type_ids = {(i.flag, i.type_name): i.type_id for i in source.items}
+        version = add_version(fitting, parsed, eft, change_note=change_note)
+        type_ids = {(i.flag, i.type_name): i.type_id for i in source_item.items}
         for item in version.items.all():
             item.type_id = type_ids.get((item.flag, item.type_name))
             item.save(update_fields=["type_id"])
@@ -224,21 +231,28 @@ def _sync_fitting(source: SourceFitting, now: Any, result: SyncResult) -> Fittin
     return fitting
 
 
-def _sync_doctrine(source: SourceDoctrine, fittings: dict[int, Fitting], now: Any, result: SyncResult) -> Doctrine:
+def _sync_doctrine(
+    source_item: SourceDoctrine,
+    fittings: dict[int, Fitting],
+    now: Any,
+    result: SyncResult,
+    *,
+    source: str = Source.FITTINGS,
+) -> Doctrine:
     doctrine, created = Doctrine.objects.get_or_create(
-        source=Source.FITTINGS,
-        external_id=source.external_id,
-        defaults={"name": source.name},
+        source=source,
+        external_id=source_item.external_id,
+        defaults={"name": source_item.name},
     )
     if not created and doctrine.status == Doctrine.Status.ARCHIVED:
         doctrine.status = Doctrine.Status.ACTIVE
-    doctrine.name = source.name
-    doctrine.description = source.description
-    doctrine.icon_url = source.icon_url
+    doctrine.name = source_item.name
+    doctrine.description = source_item.description
+    doctrine.icon_url = source_item.icon_url
     doctrine.last_synced_at = now
     doctrine.save()
 
-    wanted = [fittings[pk] for pk in source.fitting_ids if pk in fittings]
+    wanted = [fittings[pk] for pk in source_item.fitting_ids if pk in fittings]
     doctrine.doctrine_fittings.exclude(fitting__in=wanted).delete()
     existing = {df.fitting_id: df for df in doctrine.doctrine_fittings.all()}
     for order, fitting in enumerate(wanted):
@@ -261,25 +275,33 @@ def _sync_categories(
     doctrines: dict[int, Doctrine],
     now: Any,
     result: SyncResult,
+    *,
+    source: str = Source.FITTINGS,
 ) -> None:
     kept: list[int] = []
-    for source in sources:
+    for source_cat in sources:
         category, _created = Category.objects.update_or_create(
-            source=Source.FITTINGS,
-            external_id=source.external_id,
-            defaults={"name": source.name, "color": source.color, "last_synced_at": now},
+            source=source,
+            external_id=source_cat.external_id,
+            defaults={"name": source_cat.name, "color": source_cat.color, "last_synced_at": now},
         )
-        category.visible_to_groups.set(Group.objects.filter(pk__in=source.group_ids))
-        category.fittings.set([fittings[pk] for pk in source.fitting_ids if pk in fittings])
-        category.doctrines.set([doctrines[pk] for pk in source.doctrine_ids if pk in doctrines])
-        kept.append(source.external_id)
+        if source == Source.FITTINGS:
+            category.visible_to_groups.set(Group.objects.filter(pk__in=source_cat.group_ids))
+        category.fittings.set([fittings[pk] for pk in source_cat.fitting_ids if pk in fittings])
+        category.doctrines.set([doctrines[pk] for pk in source_cat.doctrine_ids if pk in doctrines])
+        kept.append(source_cat.external_id)
         result.categories_synced += 1
-    Category.objects.from_source(Source.FITTINGS).exclude(external_id__in=kept).delete()
+    Category.objects.from_source(source).exclude(external_id__in=kept).delete()
 
 
 @transaction.atomic
-def apply_snapshot(snapshot: SourceSnapshot) -> SyncResult:
-    """Make the Fittings-sourced records in Doctrine Hub match ``snapshot``.
+def apply_snapshot(
+    snapshot: SourceSnapshot,
+    *,
+    source: str = Source.FITTINGS,
+    change_note: str = "Synced from Fittings",
+) -> SyncResult:
+    """Make the sourced records in Doctrine Hub match ``snapshot``.
 
     Doctrines that disappeared from the source are archived. Fittings that
     disappeared are removed, unless one of our own doctrines still uses them.
@@ -287,19 +309,21 @@ def apply_snapshot(snapshot: SourceSnapshot) -> SyncResult:
     now = timezone.now()
     result = SyncResult()
 
-    fittings = {s.external_id: _sync_fitting(s, now, result) for s in snapshot.fittings}
-    doctrines = {s.external_id: _sync_doctrine(s, fittings, now, result) for s in snapshot.doctrines}
-    _sync_categories(snapshot.categories, fittings, doctrines, now, result)
+    fittings = {
+        s.external_id: _sync_fitting(s, now, result, source=source, change_note=change_note) for s in snapshot.fittings
+    }
+    doctrines = {s.external_id: _sync_doctrine(s, fittings, now, result, source=source) for s in snapshot.doctrines}
+    _sync_categories(snapshot.categories, fittings, doctrines, now, result, source=source)
 
     gone_doctrines = (
-        Doctrine.objects.from_source(Source.FITTINGS)
+        Doctrine.objects.from_source(source)
         .exclude(external_id__in=list(doctrines))
         .exclude(status=Doctrine.Status.ARCHIVED)
     )
     result.doctrines_archived = gone_doctrines.update(status=Doctrine.Status.ARCHIVED)
 
     gone_fittings = (
-        Fitting.objects.from_source(Source.FITTINGS)
+        Fitting.objects.from_source(source)
         .exclude(external_id__in=list(fittings))
         .exclude(doctrine_fittings__doctrine__source=Source.LOCAL)
     )

@@ -199,3 +199,54 @@ def run_fittings_sync(request: HttpRequest) -> JsonResponse:
 
     sync_from_fittings.delay(force=True)
     return JsonResponse({"queued": True, **_sync_settings_payload(SyncSettings.get_solo())})
+
+
+@login_required
+@permission_required("aa_doctrinehub.manage_doctrines")
+@require_POST
+def remote_scrape(request: HttpRequest) -> JsonResponse:
+    """Preview or import doctrines, fittings, and categories from an external Auth."""
+    from .services.remote_scrape import (
+        RemoteScrapeError,
+        import_remote_scrape,
+        preview_remote_scrape,
+        scrape_remote_fittings_site,
+    )
+
+    body = _json_body(request)
+    base_url = str(body.get("base_url") or "")
+    sessionid = str(body.get("sessionid") or "")
+    mode = str(body.get("mode") or "preview")
+    if mode not in {"preview", "import"}:
+        return JsonResponse({"error": "mode must be 'preview' or 'import'"}, status=400)
+
+    include_standalone_fits = bool(body.get("include_standalone_fits", True))
+    include_categories = bool(body.get("include_categories", True))
+
+    try:
+        snapshot = scrape_remote_fittings_site(
+            base_url,
+            sessionid,
+            include_standalone_fits=include_standalone_fits,
+            include_categories=include_categories,
+        )
+    except RemoteScrapeError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    if mode == "preview":
+        return JsonResponse(preview_remote_scrape(snapshot))
+
+    result = import_remote_scrape(snapshot)
+    return JsonResponse(
+        {
+            "mode": "import",
+            "summary": result.summary(),
+            "fittings_created": result.fittings_created,
+            "fittings_updated": result.fittings_updated,
+            "fittings_removed": result.fittings_removed,
+            "doctrines_created": result.doctrines_created,
+            "doctrines_updated": result.doctrines_updated,
+            "doctrines_archived": result.doctrines_archived,
+            "categories_synced": result.categories_synced,
+        }
+    )

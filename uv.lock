@@ -3,8 +3,8 @@ revision = 3
 requires-python = ">=3.11, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.13' and sys_platform != 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
     "(python_full_version >= '3.11.5' and python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version >= '3.11.5' and python_full_version < '3.12' and sys_platform == 'emscripten')",
     "python_full_version < '3.11.5'",
 ]
@@ -14,6 +14,8 @@ name = "aa-doctrinehub"
 source = { editable = "." }
 dependencies = [
     { name = "allianceauth" },
+    { name = "beautifulsoup4" },
+    { name = "requests" },
 ]
 
 [package.dev-dependencies]
@@ -28,7 +30,11 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "allianceauth", specifier = ">=5" }]
+requires-dist = [
+    { name = "allianceauth", specifier = ">=5" },
+    { name = "beautifulsoup4", specifier = ">=4.12" },
+    { name = "requests", specifier = ">=2.31" },
+]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1879,8 +1885,8 @@ version = "4.1.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.13' and sys_platform != 'emscripten'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
     "(python_full_version >= '3.11.5' and python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version >= '3.11.5' and python_full_version < '3.12' and sys_platform == 'emscripten')",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/82/77/d59ca6aa338bdd8d880234d15b7c466cb176e44502899a9df81ba2e13cd0/soupsieve-4.1.3.tar.gz", hash = "sha256:13f70186c8f40bf8d0ff7bbab09a18fb149600b465269207b5e5b588f55fda08", size = 181564, upload-time = "2026-11-20T12:58:27.613Z" }

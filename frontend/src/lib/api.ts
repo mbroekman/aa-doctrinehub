@@ -1,4 +1,11 @@
-import type { Doctrine, FittingDetail, FittingSummary, SyncSettings } from "@/types";
+import type {
+  Doctrine,
+  FittingDetail,
+  FittingSummary,
+  RemoteScrapeImportResult,
+  RemoteScrapePreview,
+  SyncSettings,
+} from "@/types";
 
 export interface SpaConfig {
   apiPrefix: string;
@@ -49,4 +56,24 @@ export const api = {
     request<SyncSettings>("settings/sync/", { method: "POST", body: JSON.stringify(changes) }),
   runFittingsSync: () =>
     request<SyncSettings & { queued: boolean }>("settings/sync/run/", { method: "POST" }),
+  remoteScrapePreview: (payload: {
+    base_url: string;
+    sessionid: string;
+    include_standalone_fits: boolean;
+    include_categories: boolean;
+  }) =>
+    request<RemoteScrapePreview>("settings/remote-scrape/", {
+      method: "POST",
+      body: JSON.stringify({ ...payload, mode: "preview" }),
+    }),
+  remoteScrapeImport: (payload: {
+    base_url: string;
+    sessionid: string;
+    include_standalone_fits: boolean;
+    include_categories: boolean;
+  }) =>
+    request<RemoteScrapeImportResult>("settings/remote-scrape/", {
+      method: "POST",
+      body: JSON.stringify({ ...payload, mode: "import" }),
+    }),
 };

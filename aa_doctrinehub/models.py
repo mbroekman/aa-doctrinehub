@@ -30,6 +30,7 @@ class Source(models.TextChoices):
 
     LOCAL = "local", _("Doctrine Hub")
     FITTINGS = "fittings", _("Fittings")
+    REMOTE_AUTH = "remote_auth", _("External Auth")
 
 
 class SourcedQuerySet(models.QuerySet):

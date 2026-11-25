@@ -40,6 +40,8 @@ dynamic = [
 ]
 dependencies = [
     "allianceauth>=5",
+    "beautifulsoup4>=4.12",
+    "requests>=2.31",
 ]
 
 [dependency-groups]

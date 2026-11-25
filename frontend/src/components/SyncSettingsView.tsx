@@ -3,13 +3,21 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
-import type { SyncSettings } from "@/types";
+import type { RemoteScrapeImportResult, RemoteScrapePreview, SyncSettings } from "@/types";
 
 export function SyncSettingsView() {
   const [settings, setSettings] = useState<SyncSettings | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState(false);
+  const [remoteUrl, setRemoteUrl] = useState("");
+  const [remoteSessionId, setRemoteSessionId] = useState("");
+  const [includeStandalone, setIncludeStandalone] = useState(true);
+  const [includeCategories, setIncludeCategories] = useState(true);
+  const [scrapeBusy, setScrapeBusy] = useState(false);
+  const [scrapeError, setScrapeError] = useState("");
+  const [scrapePreview, setScrapePreview] = useState<RemoteScrapePreview | null>(null);
+  const [scrapeResult, setScrapeResult] = useState<RemoteScrapeImportResult | null>(null);
 
   useEffect(() => {
     api.syncSettings().then(setSettings).catch((e: Error) => setError(e.message));
@@ -38,10 +46,36 @@ export function SyncSettingsView() {
     }
   };
 
+  const runScrape = async (mode: "preview" | "import") => {
+    setScrapeBusy(true);
+    setScrapeError("");
+    if (mode === "preview") {
+      setScrapeResult(null);
+    }
+    try {
+      const payload = {
+        base_url: remoteUrl,
+        sessionid: remoteSessionId,
+        include_standalone_fits: includeStandalone,
+        include_categories: includeCategories,
+      };
+      if (mode === "preview") {
+        setScrapePreview(await api.remoteScrapePreview(payload));
+      } else {
+        setScrapeResult(await api.remoteScrapeImport(payload));
+      }
+    } catch (e) {
+      setScrapeError((e as Error).message);
+    } finally {
+      setScrapeBusy(false);
+    }
+  };
+
   if (!settings) return error ? <p className="text-sm text-destructive">{error}</p> : null;
 
   return (
-    <Card>
+    <div className="space-y-4">
+      <Card>
       <CardHeader>
         <CardTitle>Sync from Fittings</CardTitle>
       </CardHeader>
@@ -92,5 +126,96 @@ export function SyncSettingsView() {
         {error && <p className="text-destructive">{error}</p>}
       </CardContent>
     </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Import from External Auth</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <p className="text-muted-foreground">
+            Scrapes doctrines, fittings and categories from another Alliance Auth instance using a one-time{" "}
+            <code>sessionid</code> cookie. The cookie is never stored. Imported items are labelled "External Auth" and
+            remain read-only here.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1">
+              <span className="block text-xs font-medium text-muted-foreground">External Auth URL</span>
+              <Input
+                type="url"
+                placeholder="https://zero.the-initiative.rocks"
+                value={remoteUrl}
+                onChange={(e) => setRemoteUrl(e.target.value)}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="block text-xs font-medium text-muted-foreground">sessionid cookie (DevTools)</span>
+              <Input
+                type="password"
+                placeholder="Paste sessionid cookie value"
+                value={remoteSessionId}
+                onChange={(e) => setRemoteSessionId(e.target.value)}
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={includeStandalone}
+                onChange={(e) => setIncludeStandalone(e.target.checked)}
+              />
+              Include standalone fits
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={includeCategories}
+                onChange={(e) => setIncludeCategories(e.target.checked)}
+              />
+              Include categories
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={scrapeBusy || !remoteUrl.trim() || !remoteSessionId.trim()}
+              onClick={() => void runScrape("preview")}
+            >
+              Preview
+            </Button>
+            <Button
+              size="sm"
+              disabled={scrapeBusy || !remoteUrl.trim() || !remoteSessionId.trim()}
+              onClick={() => void runScrape("import")}
+            >
+              Import now
+            </Button>
+          </div>
+          {scrapePreview && (
+            <div className="rounded-md border p-3 space-y-2">
+              <div className="font-medium">
+                Preview: {scrapePreview.doctrines_count} doctrines ({scrapePreview.doctrines_new} new),{" "}
+                {scrapePreview.fittings_count} fittings ({scrapePreview.fittings_new} new),{" "}
+                {scrapePreview.categories_count} categories ({scrapePreview.categories_new} new).
+              </div>
+              {scrapePreview.doctrines.length > 0 && (
+                <ul className="list-disc pl-5 text-xs text-muted-foreground space-y-0.5 max-h-40 overflow-y-auto">
+                  {scrapePreview.doctrines.map((d) => (
+                    <li key={d.external_id}>
+                      {d.name} ({d.fittings_count} fits){d.is_new ? " — new" : ""}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          {scrapeResult && (
+            <p className="text-muted-foreground">Import complete: {scrapeResult.summary}</p>
+          )}
+          {scrapeError && <p className="text-destructive">{scrapeError}</p>}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
