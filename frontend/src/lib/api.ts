@@ -192,6 +192,10 @@ export const api = {
   removeFittingSkill: (id: number, skill_id: number) =>
     request(`fittings/${id}/skills/`, { method: "DELETE", body: JSON.stringify({ skill_id }) }),
   complianceOverview: () => request<ComplianceOverviewResponse>("compliance/overview/"),
+  searchSkills: (q: string, id?: number) =>
+    request<{ skills: { id: number; name: string }[] }>(
+      `skills/search/?q=${encodeURIComponent(q)}${id ? `&id=${id}` : ""}`,
+    ).then((r) => r.skills),
   rules: () => request<{ rules: ComplianceRule[]; groups: { id: number; name: string }[] }>("rules/"),
   createRule: (payload: Partial<ComplianceRule>) =>
     request<ComplianceRule>("rules/", { method: "POST", body: JSON.stringify(payload) }),

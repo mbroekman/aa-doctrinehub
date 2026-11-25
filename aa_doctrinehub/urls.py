@@ -31,6 +31,7 @@ urlpatterns = [
     path("api/v1/eligibility/status/", views_spa_api.eligibility_status, name="api_eligibility_status"),
     path("api/v1/eligibility/sync/", views_spa_api.eligibility_sync, name="api_eligibility_sync"),
     path("api/v1/compliance/overview/", views_spa_api.compliance_overview_view, name="api_compliance_overview"),
+    path("api/v1/skills/search/", views_spa_api.skills_search, name="api_skills_search"),
     path("api/v1/rules/", views_spa_api.rules_collection, name="api_rules"),
     path("api/v1/rules/<int:rule_id>/", views_spa_api.rule_detail, name="api_rule_detail"),
     path("api/v1/rules/evaluate/", views_spa_api.rules_evaluate, name="api_rules_evaluate"),

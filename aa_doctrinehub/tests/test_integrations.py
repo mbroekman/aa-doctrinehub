@@ -1,6 +1,7 @@
 """Tests for Phase 4: Hangar check, shortages, and SRP killmail comparison."""
 
 import pytest
+from allianceauth.authentication.models import CharacterOwnership
 from allianceauth.tests.auth_utils import AuthUtils
 from django.urls import reverse
 
@@ -23,6 +24,7 @@ def test_hangar_check_and_shortages_and_srp(client):
     user.profile.refresh_from_db()
     char = user.profile.main_character
     assert char is not None
+    CharacterOwnership.objects.get_or_create(user=user, character=char, defaults={"owner_hash": "hash-95001"})
     AuthUtils.add_permission_to_user_by_name("aa_doctrinehub.basic_access", user)
 
     fitting = import_eft(EFT)

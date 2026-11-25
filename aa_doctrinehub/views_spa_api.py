@@ -16,6 +16,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from .discord_i18n import language_choices
 from .models import (
     Category,
+    CharacterSkill,
     ComplianceAuditLog,
     ComplianceRule,
     Doctrine,
@@ -536,6 +537,58 @@ def compliance_overview_view(request: HttpRequest) -> JsonResponse:
     """Return doctrine/role coverage and skill gap analysis."""
     qs = visible_doctrines(_user(request))
     return JsonResponse(compliance_overview(qs))
+
+
+@login_required
+@permission_required("aa_doctrinehub.basic_access")
+@require_GET
+def skills_search(request: HttpRequest) -> JsonResponse:
+    """Search EVE skills by name or ID (via eveuniverse if installed, plus synced skill snapshots)."""
+    q = str(request.GET.get("q") or "").strip()
+    skill_id_param = request.GET.get("id")
+    results: dict[int, str] = {}
+
+    try:
+        from eveuniverse.models import EveType
+
+        qs = EveType.objects.filter(eve_group__eve_category_id=16, published=True)
+        if skill_id_param and skill_id_param.isdigit():
+            qs = qs.filter(id=int(skill_id_param))
+        elif q:
+            if q.isdigit():
+                qs = qs.filter(id=int(q))
+            else:
+                qs = qs.filter(name__icontains=q)
+        for tid, name in qs.order_by("name").values_list("id", "name")[:50]:
+            results[int(tid)] = str(name)
+    except ImportError:
+        pass
+
+    if len(results) < 50:
+        cs_qs = CharacterSkill.objects.all()
+        fs_qs = FittingSkillRequirement.objects.all()
+        if skill_id_param and skill_id_param.isdigit():
+            cs_qs = cs_qs.filter(skill_id=int(skill_id_param))
+            fs_qs = fs_qs.filter(skill_id=int(skill_id_param))
+        elif q:
+            if q.isdigit():
+                cs_qs = cs_qs.filter(skill_id=int(q))
+                fs_qs = fs_qs.filter(skill_id=int(q))
+            else:
+                cs_qs = cs_qs.filter(skill_name__icontains=q)
+                fs_qs = fs_qs.filter(skill_name__icontains=q)
+        for sid, sname in cs_qs.values_list("skill_id", "skill_name").distinct()[:50]:
+            if int(sid) not in results and sname:
+                results[int(sid)] = str(sname)
+        for sid, sname in fs_qs.values_list("skill_id", "skill_name").distinct()[:50]:
+            if int(sid) not in results and sname:
+                results[int(sid)] = str(sname)
+
+    items = sorted(
+        ({"id": sid, "name": sname} for sid, sname in results.items()),
+        key=lambda x: str(x["name"]),
+    )[:50]
+    return JsonResponse({"skills": items})
 
 
 # ---------------------------------------------------------------------------

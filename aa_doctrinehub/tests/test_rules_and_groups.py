@@ -3,6 +3,7 @@
 from datetime import timedelta
 
 import pytest
+from allianceauth.authentication.models import CharacterOwnership
 from allianceauth.tests.auth_utils import AuthUtils
 from django.contrib.auth.models import Group
 from django.utils import timezone
@@ -32,6 +33,7 @@ def _user_with_snapshot(username="rulepilot", char_id=94001, total_sp=20000000, 
     user.profile.refresh_from_db()
     char = user.profile.main_character
     assert char is not None
+    CharacterOwnership.objects.get_or_create(user=user, character=char, defaults={"owner_hash": f"hash-{char_id}"})
     snap = CharacterSkillSnapshot.objects.create(
         character=char,
         total_sp=total_sp,

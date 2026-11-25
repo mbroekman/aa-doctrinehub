@@ -183,6 +183,18 @@ export function RulesView({
     setConditions(parsed.conditions);
   };
 
+  const [skillQuery, setSkillQuery] = useState("");
+  const [skillOptions, setSkillOptions] = useState<{ id: number; name: string }[]>([]);
+  const [fittingQuery, setFittingQuery] = useState("");
+  const [doctrineQuery, setDoctrineQuery] = useState("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      api.searchSkills(skillQuery).then(setSkillOptions).catch(() => undefined);
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [skillQuery]);
+
   const load = useCallback(() => {
     setError("");
     Promise.all([api.rules(), api.approvals(), api.auditLogs(), api.notificationSettings()])
@@ -383,16 +395,27 @@ export function RulesView({
                     <div className="grid gap-2 sm:grid-cols-3">
                       <div className="space-y-1 sm:col-span-2">
                         <label className="text-xs text-muted-foreground">Fitting</label>
+                        <Input
+                          placeholder="Search fitting or ship..."
+                          value={fittingQuery}
+                          onChange={(e) => setFittingQuery(e.target.value)}
+                          className="h-8 text-xs"
+                        />
                         <select
                           value={cond.fittingId}
                           onChange={(e) => updateCond(idx, { fittingId: Number(e.target.value) })}
                           className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                         >
-                          {fittings.map((f) => (
-                            <option key={f.id} value={f.id}>
-                              {f.ship_type_name} — {f.name}
-                            </option>
-                          ))}
+                          {fittings
+                            .filter((f) => {
+                              const q = fittingQuery.trim().toLowerCase();
+                              return !q || `${f.ship_type_name} ${f.name}`.toLowerCase().includes(q);
+                            })
+                            .map((f) => (
+                              <option key={f.id} value={f.id}>
+                                {f.ship_type_name} — {f.name}
+                              </option>
+                            ))}
                           {!fittings.length && <option value={0}>No fittings available</option>}
                         </select>
                       </div>
@@ -416,16 +439,27 @@ export function RulesView({
                     <div className="grid gap-2 sm:grid-cols-3">
                       <div className="space-y-1 sm:col-span-2">
                         <label className="text-xs text-muted-foreground">Doctrine</label>
+                        <Input
+                          placeholder="Search doctrine..."
+                          value={doctrineQuery}
+                          onChange={(e) => setDoctrineQuery(e.target.value)}
+                          className="h-8 text-xs"
+                        />
                         <select
                           value={cond.doctrineId}
                           onChange={(e) => updateCond(idx, { doctrineId: Number(e.target.value) })}
                           className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                         >
-                          {doctrines.map((d) => (
-                            <option key={d.id} value={d.id}>
-                              {d.name}
-                            </option>
-                          ))}
+                          {doctrines
+                            .filter((d) => {
+                              const q = doctrineQuery.trim().toLowerCase();
+                              return !q || d.name.toLowerCase().includes(q);
+                            })
+                            .map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.name}
+                              </option>
+                            ))}
                           {!doctrines.length && <option value={0}>No doctrines available</option>}
                         </select>
                       </div>
@@ -443,14 +477,29 @@ export function RulesView({
                   )}
 
                   {cond.type === "skill" && (
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Skill Type ID</label>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <div className="space-y-1 sm:col-span-2">
+                        <label className="text-xs text-muted-foreground">Skill</label>
                         <Input
-                          type="number"
+                          placeholder="Search skill by name or ID..."
+                          value={skillQuery}
+                          onChange={(e) => setSkillQuery(e.target.value)}
+                          className="h-8 text-xs"
+                        />
+                        <select
                           value={cond.skillId}
                           onChange={(e) => updateCond(idx, { skillId: Number(e.target.value) })}
-                        />
+                          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          {!skillOptions.some((s) => s.id === cond.skillId) && cond.skillId > 0 && (
+                            <option value={cond.skillId}>Skill #{cond.skillId}</option>
+                          )}
+                          {skillOptions.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name} ({s.id})
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       <div className="space-y-1">
                         <label className="text-xs text-muted-foreground">Minimum level (1–5)</label>
