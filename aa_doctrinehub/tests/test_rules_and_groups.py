@@ -9,14 +9,17 @@ from django.contrib.auth.models import Group
 from django.utils import timezone
 
 from aa_doctrinehub.models import (
+    CharacterAsset,
     CharacterSkill,
     CharacterSkillSnapshot,
     ComplianceAuditLog,
     ComplianceRule,
+    FittingSkillRequirement,
     GroupGrant,
     PendingApproval,
     RuleEvaluation,
 )
+from aa_doctrinehub.services.fittings import import_eft
 from aa_doctrinehub.services.rules import (
     apply_rule_for_user,
     decide_pending_approval,
@@ -130,3 +133,50 @@ def test_reviewer_approval_workflow():
     decide_pending_approval(approval, reviewer, approve=True, note="Looks good")
     assert user.groups.filter(pk=group.pk).exists()
     assert ComplianceAuditLog.objects.filter(rule=rule, user=user, action=ComplianceAuditLog.Action.APPROVED).exists()
+
+
+def test_can_fly_fitting_requires_skills_and_ship_in_structure():
+    user, char, snap = _user_with_snapshot("structpilot", 94005, total_sp=20000000, cap_level=1)
+    fitting = import_eft("[Rifter, Tackle]\n\nDamage Control II")
+    fitting.ship_type_id = 587
+    fitting.save(update_fields=["ship_type_id"])
+    version = fitting.current_version
+    assert version is not None
+    FittingSkillRequirement.objects.create(
+        version=version, skill_id=20533, skill_name="Capital Ships", required_level=1, recommended_level=1
+    )
+
+    tree = {"type": "can_fly_fitting", "fitting_id": fitting.pk, "level": "minimum"}
+    # Skills present, but no ship in a structure -> FAIL
+    status, _ = evaluate_condition_tree(tree, user)
+    assert status == RuleEvaluation.Status.FAIL
+
+    # Ship in NPC station only (< 1_000_000_000_000) -> still FAIL
+    CharacterAsset.objects.create(
+        character=char,
+        item_id=8001,
+        type_id=587,
+        type_name="Rifter",
+        location_id=60003760,
+        location_flag="Hangar",
+        location_type="station",
+        quantity=1,
+        is_singleton=True,
+    )
+    status, _ = evaluate_condition_tree(tree, user)
+    assert status == RuleEvaluation.Status.FAIL
+
+    # Ship in a player structure (>= 1_000_000_000_000) -> PASS
+    CharacterAsset.objects.create(
+        character=char,
+        item_id=8002,
+        type_id=587,
+        type_name="Rifter",
+        location_id=1035466617946,
+        location_flag="Hangar",
+        location_type="item",
+        quantity=1,
+        is_singleton=True,
+    )
+    status, _ = evaluate_condition_tree(tree, user)
+    assert status == RuleEvaluation.Status.PASS

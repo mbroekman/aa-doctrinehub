@@ -31,6 +31,7 @@ interface DraftCondition {
   type: string;
   fittingId: number;
   fittingLevel: "minimum" | "recommended";
+  requireShip: boolean;
   doctrineId: number;
   doctrineFittingId: number;
   minPct: number;
@@ -57,6 +58,7 @@ function makeDefaultCondition(
     type: fittings.length ? "can_fly_fitting" : doctrines.length ? "doctrine_coverage" : "skill",
     fittingId: fittings[0]?.id ?? 0,
     fittingLevel: "minimum",
+    requireShip: true,
     doctrineId: doctrines[0]?.id ?? 0,
     doctrineFittingId: 0,
     minPct: 100,
@@ -75,11 +77,22 @@ function makeDefaultCondition(
 function toConditionNode(c: DraftCondition): RuleConditionNode {
   switch (c.type) {
     case "can_fly_fitting":
-      return { type: "can_fly_fitting", fitting_id: c.fittingId, level: c.fittingLevel };
+      return { type: "can_fly_fitting", fitting_id: c.fittingId, level: c.fittingLevel, require_ship: c.requireShip };
     case "doctrine_coverage":
       return c.doctrineFittingId > 0
-        ? { type: "doctrine_coverage", doctrine_id: c.doctrineId, fitting_id: c.doctrineFittingId, level: c.fittingLevel }
-        : { type: "doctrine_coverage", doctrine_id: c.doctrineId, min_required_pct: c.minPct };
+        ? {
+            type: "doctrine_coverage",
+            doctrine_id: c.doctrineId,
+            fitting_id: c.doctrineFittingId,
+            level: c.fittingLevel,
+            require_ship: c.requireShip,
+          }
+        : {
+            type: "doctrine_coverage",
+            doctrine_id: c.doctrineId,
+            min_required_pct: c.minPct,
+            require_ship: c.requireShip,
+          };
     case "skill":
       return { type: "skill", skill_id: c.skillId, min_level: c.minSkillLevel };
     case "total_sp":
@@ -108,6 +121,7 @@ function fromConditionNode(
     type: t,
     fittingId: Number(node.fitting_id ?? base.fittingId),
     fittingLevel: node.level === "recommended" ? "recommended" : "minimum",
+    requireShip: node.require_ship !== false,
     doctrineId: Number(node.doctrine_id ?? base.doctrineId),
     doctrineFittingId: Number(node.fitting_id ?? 0),
     minPct: Number(node.min_required_pct ?? base.minPct),
@@ -247,6 +261,14 @@ function ConditionEditor({
                 <option value="recommended">Recommended</option>
               </select>
             </div>
+            <label className="flex items-center gap-2 text-xs sm:col-span-3">
+              <input
+                type="checkbox"
+                checked={cond.requireShip}
+                onChange={(e) => onChange({ requireShip: e.target.checked })}
+              />
+              Also require ship hull in a structure
+            </label>
           </div>
         );
       })()}
@@ -336,6 +358,14 @@ function ConditionEditor({
                 />
               </div>
             )}
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={cond.requireShip}
+                onChange={(e) => onChange({ requireShip: e.target.checked })}
+              />
+              Also require ship hull in a structure
+            </label>
           </div>
         );
       })()}

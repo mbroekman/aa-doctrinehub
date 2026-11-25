@@ -52,12 +52,26 @@ def _user_snapshots(user: User) -> list[CharacterSkillSnapshot]:
     return snaps
 
 
+def _user_has_ship_in_structure(snapshots: list[CharacterSkillSnapshot], ship_type_id: int | None) -> bool:
+    """Return True if any synced character of the account has the ship hull docked in a player structure."""
+    if not ship_type_id or not snapshots:
+        return False
+    char_ids = [s.character_id for s in snapshots]
+    return CharacterAsset.objects.filter(
+        character_id__in=char_ids,
+        type_id=ship_type_id,
+        is_singleton=True,
+        location_id__gte=1000000000000,
+    ).exists()
+
+
 def _eval_leaf(node: dict[str, Any], user: User, snapshots: list[CharacterSkillSnapshot]) -> tuple[str, str]:
     ctype = str(node.get("type", ""))
 
     if ctype == "can_fly_fitting":
         fitting_id = int(node.get("fitting_id") or 0)
         level = str(node.get("level", "minimum"))
+        require_ship = bool(node.get("require_ship", True))
         fitting = Fitting.objects.filter(pk=fitting_id).prefetch_related("versions__skill_requirements").first()
         if fitting is None or fitting.current_version is None:
             return UNKNOWN, "Fitting not found"
@@ -69,17 +83,20 @@ def _eval_leaf(node: dict[str, Any], user: User, snapshots: list[CharacterSkillS
             key=lambda e: STATUS_RANK[e["status"]],
         )
         ok_statuses = {"green"} if level == "recommended" else {"green", "yellow"}
-        if best["status"] in ok_statuses:
-            return PASS, f"Can fly {fitting.name}"
         if best["status"] == "unknown":
             return UNKNOWN, "Skill snapshot unknown"
-        return FAIL, f"Cannot fly {fitting.name}"
+        if best["status"] not in ok_statuses:
+            return FAIL, f"Cannot fly {fitting.name} (missing skills)"
+        if require_ship and not _user_has_ship_in_structure(snapshots, fitting.ship_type_id):
+            return FAIL, f"Ship {fitting.ship_type_name} not present in a structure"
+        return PASS, f"Can fly {fitting.name}"
 
     if ctype == "doctrine_coverage":
         doctrine_id = int(node.get("doctrine_id") or 0)
         fitting_id = int(node.get("fitting_id") or 0)
         min_pct = float(node.get("min_required_pct", 100))
         level = str(node.get("level", "minimum"))
+        require_ship = bool(node.get("require_ship", True))
         doctrine = (
             Doctrine.objects.filter(pk=doctrine_id)
             .prefetch_related("doctrine_fittings__fitting__versions__skill_requirements")
@@ -99,11 +116,13 @@ def _eval_leaf(node: dict[str, Any], user: User, snapshots: list[CharacterSkillS
                 key=lambda e: STATUS_RANK[e["status"]],
             )
             ok_statuses = {"green"} if level == "recommended" else {"green", "yellow"}
-            if best["status"] in ok_statuses:
-                return PASS, f"{doctrine.name}: can fly {df.fitting.name}"
             if best["status"] == "unknown":
                 return UNKNOWN, "Skill snapshot unknown"
-            return FAIL, f"{doctrine.name}: cannot fly {df.fitting.name}"
+            if best["status"] not in ok_statuses:
+                return FAIL, f"{doctrine.name}: cannot fly {df.fitting.name} (missing skills)"
+            if require_ship and not _user_has_ship_in_structure(snapshots, df.fitting.ship_type_id):
+                return FAIL, f"{doctrine.name}: {df.fitting.ship_type_name} not present in a structure"
+            return PASS, f"{doctrine.name}: can fly {df.fitting.name}"
         req_dfs = [df for df in doctrine.doctrine_fittings.all() if df.is_required and df.fitting.current_version]
         if not req_dfs:
             return PASS, f"{doctrine.name}: no required fittings"
@@ -117,7 +136,9 @@ def _eval_leaf(node: dict[str, Any], user: User, snapshots: list[CharacterSkillS
                 (evaluate_fitting_for_snapshot(reqs, s)["status"] for s in snapshots),
                 key=lambda st: STATUS_RANK[st],
             )
-            if best_status in {"green", "yellow"}:
+            has_skills = best_status in {"green", "yellow"}
+            has_ship = (not require_ship) or _user_has_ship_in_structure(snapshots, df.fitting.ship_type_id)
+            if has_skills and has_ship:
                 flyable += 1
         pct = (flyable / len(req_dfs)) * 100.0
         return (PASS if pct >= min_pct else FAIL), f"{doctrine.name}: {pct:.0f}% (need {min_pct:.0f}%)"
