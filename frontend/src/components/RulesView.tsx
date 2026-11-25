@@ -496,6 +496,45 @@ function ConditionEditor({
   );
 }
 
+function parseFallbackItems(reasons: string[]) {
+  const rows: {
+    doctrine: string;
+    ship: string;
+    can_fly: boolean | null;
+    in_structure: boolean | null;
+    detail: string;
+  }[] = [];
+  for (const raw of reasons) {
+    for (const part of raw.split(/\s*\|\s*|\s*;\s*/)) {
+      const line = part.trim();
+      if (!line) continue;
+      // e.g. "Voidhawks - Apocalypse Navy Issue: can fly i.Voidhawk DPS & ship in structure"
+      const canFlyMatch = line.match(/^(.+?):\s*can fly\s+(.+?)\s*&\s*ship in structure$/i);
+      if (canFlyMatch) {
+        rows.push({
+          doctrine: canFlyMatch[1].trim(),
+          ship: canFlyMatch[2].trim(),
+          can_fly: true,
+          in_structure: true,
+          detail: "",
+        });
+        continue;
+      }
+      const noShipMatch = line.match(/^(.+?):\s*no\s+(.+?)\s+(?:present )?in a player structure$/i);
+      if (noShipMatch) {
+        rows.push({
+          doctrine: noShipMatch[1].trim(),
+          ship: noShipMatch[2].trim(),
+          can_fly: true,
+          in_structure: false,
+          detail: "",
+        });
+      }
+    }
+  }
+  return rows;
+}
+
 export function RulesView({
   doctrines,
   fittings,
@@ -511,6 +550,7 @@ export function RulesView({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [expandedRules, setExpandedRules] = useState<Record<number, boolean>>({});
+  const [evalFilters, setEvalFilters] = useState<Record<number, "all" | "pass" | "fail" | "unknown">>({});
 
   const [editingRuleId, setEditingRuleId] = useState<number | null>(null);
   const [name, setName] = useState("");
@@ -837,6 +877,10 @@ export function RulesView({
               </div>
               {r.evaluations && r.evaluations.length > 0 && (() => {
                 const isOpen = Boolean(expandedRules[r.id]);
+                const activeFilter = evalFilters[r.id] || "all";
+                const filteredEvals = r.evaluations.filter(
+                  (ev) => activeFilter === "all" || ev.status === activeFilter,
+                );
                 return (
                   <div className="border-t border-border/50 pt-2 text-xs">
                     <button
@@ -850,81 +894,111 @@ export function RulesView({
                       {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                     </button>
                     {isOpen && (
-                      <div className="mt-2 max-h-72 space-y-2 overflow-y-auto">
-                        {r.evaluations.map((ev) => (
-                          <div key={ev.username} className="rounded-md border border-border/60 p-2">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex items-center gap-1.5">
-                                <Badge
-                                  variant={
-                                    ev.status === "pass"
-                                      ? "default"
-                                      : ev.status === "fail"
-                                        ? "destructive"
-                                        : "outline"
-                                  }
-                                >
-                                  {ev.status.toUpperCase()}
-                                </Badge>
-                                <span className="font-medium">{ev.username}</span>
+                      <div className="mt-2 space-y-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {(["all", "pass", "fail", "unknown"] as const).map((statusKey) => {
+                            const count =
+                              statusKey === "all"
+                                ? r.evaluations!.length
+                                : r.evaluations!.filter((e) => e.status === statusKey).length;
+                            return (
+                              <Button
+                                key={statusKey}
+                                size="sm"
+                                variant={activeFilter === statusKey ? "default" : "outline"}
+                                className="h-7 px-2.5 text-xs"
+                                onClick={() =>
+                                  setEvalFilters((prev) => ({ ...prev, [r.id]: statusKey }))
+                                }
+                              >
+                                {statusKey.toUpperCase()} ({count})
+                              </Button>
+                            );
+                          })}
+                        </div>
+                        <div className="max-h-80 space-y-2 overflow-y-auto">
+                          {filteredEvals.map((ev) => {
+                            const tableItems =
+                              ev.items && ev.items.length > 0 ? ev.items : parseFallbackItems(ev.reasons);
+                            return (
+                              <div key={ev.username} className="rounded-md border border-border/60 p-2">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <Badge
+                                      variant={
+                                        ev.status === "pass"
+                                          ? "default"
+                                          : ev.status === "fail"
+                                            ? "destructive"
+                                            : "outline"
+                                      }
+                                    >
+                                      {ev.status.toUpperCase()}
+                                    </Badge>
+                                    <span className="font-medium">{ev.username}</span>
+                                  </div>
+                                  <span className="text-[11px] text-muted-foreground">
+                                    {ev.evaluated_at ? new Date(ev.evaluated_at).toLocaleString() : ""}
+                                    {ev.grace_until ? ` · grace until ${new Date(ev.grace_until).toLocaleString()}` : ""}
+                                  </span>
+                                </div>
+                                {tableItems.length > 0 ? (
+                                  <div className="mt-2 overflow-x-auto">
+                                    <table className="w-full text-left text-xs">
+                                      <thead>
+                                        <tr className="border-b border-border text-[11px] uppercase text-muted-foreground">
+                                          <th className="py-1 pr-3">Doctrine</th>
+                                          <th className="py-1 pr-3">Ship</th>
+                                          <th className="py-1 pr-3">Can fly</th>
+                                          <th className="py-1">In structure</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {tableItems.map((item, idx) => (
+                                          <tr key={idx} className="border-b border-border/40 last:border-b-0">
+                                            <td className="py-1 pr-3 text-muted-foreground">{item.doctrine}</td>
+                                            <td className="py-1 pr-3 font-medium">{item.ship}</td>
+                                            <td className="py-1 pr-3">
+                                              <Badge variant={item.can_fly ? "default" : "destructive"}>
+                                                {item.can_fly ? "Yes" : "No"}
+                                              </Badge>
+                                              {item.detail && (
+                                                <div className="mt-0.5 text-[11px] text-destructive">{item.detail}</div>
+                                              )}
+                                            </td>
+                                            <td className="py-1">
+                                              {item.in_structure === null ? (
+                                                <span className="text-muted-foreground">Not checked</span>
+                                              ) : (
+                                                <Badge variant={item.in_structure ? "default" : "destructive"}>
+                                                  {item.in_structure ? "Yes" : "No"}
+                                                </Badge>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                ) : (
+                                  ev.reasons.length > 0 && (
+                                    <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-muted-foreground">
+                                      {ev.reasons
+                                        .flatMap((reason) => reason.split(/\s*\|\s*|\s*;\s*/))
+                                        .filter(Boolean)
+                                        .map((part, i) => (
+                                          <li key={i}>{part}</li>
+                                        ))}
+                                    </ul>
+                                  )
+                                )}
                               </div>
-                              <span className="text-[11px] text-muted-foreground">
-                                {ev.evaluated_at ? new Date(ev.evaluated_at).toLocaleString() : ""}
-                                {ev.grace_until ? ` · grace until ${new Date(ev.grace_until).toLocaleString()}` : ""}
-                              </span>
-                            </div>
-                            {ev.items && ev.items.length > 0 ? (
-                              <div className="mt-2 overflow-x-auto">
-                                <table className="w-full text-left text-xs">
-                                  <thead>
-                                    <tr className="border-b border-border text-[11px] uppercase text-muted-foreground">
-                                      <th className="py-1 pr-3">Doctrine</th>
-                                      <th className="py-1 pr-3">Ship</th>
-                                      <th className="py-1 pr-3">Can fly</th>
-                                      <th className="py-1">In structure</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {ev.items.map((item, idx) => (
-                                      <tr key={idx} className="border-b border-border/40 last:border-b-0">
-                                        <td className="py-1 pr-3 text-muted-foreground">{item.doctrine}</td>
-                                        <td className="py-1 pr-3 font-medium">{item.ship}</td>
-                                        <td className="py-1 pr-3">
-                                          <Badge variant={item.can_fly ? "default" : "destructive"}>
-                                            {item.can_fly ? "Yes" : "No"}
-                                          </Badge>
-                                          {item.detail && (
-                                            <div className="mt-0.5 text-[11px] text-destructive">{item.detail}</div>
-                                          )}
-                                        </td>
-                                        <td className="py-1">
-                                          {item.in_structure === null ? (
-                                            <span className="text-muted-foreground">Not checked</span>
-                                          ) : (
-                                            <Badge variant={item.in_structure ? "default" : "destructive"}>
-                                              {item.in_structure ? "Yes" : "No"}
-                                            </Badge>
-                                          )}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            ) : (
-                              ev.reasons.length > 0 && (
-                                <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-muted-foreground">
-                                  {ev.reasons
-                                    .flatMap((reason) => reason.split(/\s*\|\s*|\s*;\s*/))
-                                    .filter(Boolean)
-                                    .map((part, i) => (
-                                      <li key={i}>{part}</li>
-                                    ))}
-                                </ul>
-                              )
-                            )}
-                          </div>
-                        ))}
+                            );
+                          })}
+                          {!filteredEvals.length && (
+                            <p className="text-muted-foreground">No users with status {activeFilter.toUpperCase()}.</p>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
