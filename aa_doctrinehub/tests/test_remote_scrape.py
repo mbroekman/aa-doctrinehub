@@ -247,3 +247,30 @@ def test_batched_scrape_skips_existing_and_preserves_earlier_batches():
     assert res2.fittings_created == 1
     assert res2.fittings_removed == 0
     assert Fitting.objects.from_source(Source.REMOTE_AUTH).count() == 2
+
+
+def test_remote_scrape_purge_deletes_remote_auth_only(client):
+    from allianceauth.tests.auth_utils import AuthUtils
+
+    from aa_doctrinehub.services.fittings import import_eft
+
+    local_fit = import_eft("[Rifter, Local Fit]\n\nDamage Control II")
+    remote_fit = Fitting.objects.create(
+        source=Source.REMOTE_AUTH, external_id=501, name="Remote Fit", ship_type_name="Muninn"
+    )
+    Doctrine.objects.create(source=Source.REMOTE_AUTH, external_id=51, name="Remote Doc")
+    Category.objects.create(source=Source.REMOTE_AUTH, external_id=61, name="Remote Cat")
+
+    user = AuthUtils.create_user("mgr_purge")
+    AuthUtils.add_main_character(user, "Mgr Purge", character_id=92100)
+    AuthUtils.add_permission_to_user_by_name("aa_doctrinehub.manage_doctrines", user)
+    client.force_login(user)
+
+    resp = client.post(reverse("aa_doctrinehub:api_remote_scrape_purge"))
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["doctrines_deleted"] == 1
+    assert data["fittings_deleted"] == 1
+    assert data["categories_deleted"] == 1
+    assert not Fitting.objects.filter(pk=remote_fit.pk).exists()
+    assert Fitting.objects.filter(pk=local_fit.pk).exists()

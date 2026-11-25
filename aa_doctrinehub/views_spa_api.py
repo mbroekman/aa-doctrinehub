@@ -222,7 +222,10 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
 
     include_standalone_fits = bool(body.get("include_standalone_fits", True))
     include_categories = bool(body.get("include_categories", True))
-    skip_existing = bool(body.get("skip_existing", False))
+    if "overwrite_existing" in body:
+        skip_existing = not bool(body["overwrite_existing"])
+    else:
+        skip_existing = bool(body.get("skip_existing", False))
     raw_limit = body.get("limit")
     limit: int | None = None
     if raw_limit not in (None, "", 0, "0"):
@@ -284,3 +287,14 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
             ],
         }
     )
+
+
+@login_required
+@permission_required("aa_doctrinehub.manage_doctrines")
+@require_POST
+def remote_scrape_purge(request: HttpRequest) -> JsonResponse:
+    """Delete all imported External Auth doctrines, fittings, and categories."""
+    from .services.remote_scrape import purge_remote_auth_records
+
+    counts = purge_remote_auth_records()
+    return JsonResponse({"ok": True, **counts})

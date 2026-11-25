@@ -3,7 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
-import type { RemoteScrapeImportResult, RemoteScrapePreview, SyncSettings } from "@/types";
+import type {
+  RemoteScrapeImportResult,
+  RemoteScrapePreview,
+  RemoteScrapePurgeResult,
+  SyncSettings,
+} from "@/types";
 
 export function SyncSettingsView() {
   const [settings, setSettings] = useState<SyncSettings | null>(null);
@@ -15,11 +20,14 @@ export function SyncSettingsView() {
   const [includeStandalone, setIncludeStandalone] = useState(true);
   const [includeCategories, setIncludeCategories] = useState(true);
   const [batchLimit, setBatchLimit] = useState("25");
-  const [skipExisting, setSkipExisting] = useState(true);
+  const [overwriteExisting, setOverwriteExisting] = useState(false);
   const [scrapeModeBusy, setScrapeModeBusy] = useState<"preview" | "import" | null>(null);
   const [scrapeError, setScrapeError] = useState("");
   const [scrapePreview, setScrapePreview] = useState<RemoteScrapePreview | null>(null);
   const [scrapeResult, setScrapeResult] = useState<RemoteScrapeImportResult | null>(null);
+  const [confirmPurge, setConfirmPurge] = useState(false);
+  const [purgeBusy, setPurgeBusy] = useState(false);
+  const [purgeResult, setPurgeResult] = useState<RemoteScrapePurgeResult | null>(null);
 
   useEffect(() => {
     api.syncSettings().then(setSettings).catch((e: Error) => setError(e.message));
@@ -51,6 +59,7 @@ export function SyncSettingsView() {
   const runScrape = async (mode: "preview" | "import") => {
     setScrapeModeBusy(mode);
     setScrapeError("");
+    setPurgeResult(null);
     if (mode === "preview") {
       setScrapeResult(null);
     }
@@ -62,7 +71,7 @@ export function SyncSettingsView() {
         include_standalone_fits: includeStandalone,
         include_categories: includeCategories,
         limit: parsedLimit && parsedLimit > 0 ? parsedLimit : null,
-        skip_existing: skipExisting,
+        overwrite_existing: overwriteExisting,
       };
       if (mode === "preview") {
         setScrapePreview(await api.remoteScrapePreview(payload));
@@ -74,6 +83,22 @@ export function SyncSettingsView() {
       setScrapeError((e as Error).message);
     } finally {
       setScrapeModeBusy(null);
+    }
+  };
+
+  const runPurge = async () => {
+    setPurgeBusy(true);
+    setScrapeError("");
+    try {
+      const res = await api.remoteScrapePurge();
+      setPurgeResult(res);
+      setScrapePreview(null);
+      setScrapeResult(null);
+      setConfirmPurge(false);
+    } catch (e) {
+      setScrapeError((e as Error).message);
+    } finally {
+      setPurgeBusy(false);
     }
   };
 
@@ -178,10 +203,10 @@ export function SyncSettingsView() {
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
-                checked={skipExisting}
-                onChange={(e) => setSkipExisting(e.target.checked)}
+                checked={overwriteExisting}
+                onChange={(e) => setOverwriteExisting(e.target.checked)}
               />
-              Skip already imported
+              Overwrite existing
             </label>
             <label className="flex items-center gap-2">
               <input
@@ -211,10 +236,18 @@ export function SyncSettingsView() {
             </Button>
             <Button
               size="sm"
-              disabled={scrapeModeBusy !== null || !remoteUrl.trim() || !remoteSessionId.trim()}
+              disabled={scrapeModeBusy !== null || purgeBusy || !remoteUrl.trim() || !remoteSessionId.trim()}
               onClick={() => void runScrape("import")}
             >
               {scrapeModeBusy === "import" ? "Importing..." : "Import now"}
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={scrapeModeBusy !== null || purgeBusy}
+              onClick={() => setConfirmPurge(true)}
+            >
+              Delete imported items
             </Button>
             {scrapeModeBusy === "preview" && (
               <span className="text-xs text-muted-foreground">Reading index pages from external Auth...</span>
@@ -225,6 +258,38 @@ export function SyncSettingsView() {
               </span>
             )}
           </div>
+          {confirmPurge && (
+            <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 flex flex-wrap items-center justify-between gap-3">
+              <span className="text-xs">
+                Delete all imported External Auth doctrines, fittings, and categories? Local Doctrine Hub items will not
+                be affected.
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={purgeBusy}
+                  onClick={() => setConfirmPurge(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={purgeBusy}
+                  onClick={() => void runPurge()}
+                >
+                  {purgeBusy ? "Deleting..." : "Confirm delete"}
+                </Button>
+              </div>
+            </div>
+          )}
+          {purgeResult && (
+            <div className="rounded-md border p-3 text-xs">
+              Deleted {purgeResult.doctrines_deleted} doctrines, {purgeResult.fittings_deleted} fittings, and{" "}
+              {purgeResult.categories_deleted} categories from External Auth.
+            </div>
+          )}
           {scrapePreview && (
             <div className="rounded-md border p-3 space-y-2">
               <div className="font-medium">Preview summary</div>

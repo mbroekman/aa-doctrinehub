@@ -15,6 +15,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
+from django.db import transaction
 
 from ..models import Category, Doctrine, Fitting, Source
 from .eft import EftParseError, parse_eft
@@ -492,3 +493,20 @@ def import_remote_scrape(snapshot: SourceSnapshot, *, prune_missing: bool = True
         change_note="Synced from External Auth",
         prune_missing=prune_missing,
     )
+
+
+@transaction.atomic
+def purge_remote_auth_records() -> dict[str, int]:
+    """Delete all External Auth (Source.REMOTE_AUTH) doctrines, categories, and unused fittings."""
+    _total_cat, cat_deleted = Category.objects.from_source(Source.REMOTE_AUTH).delete()
+    _total_doc, doc_deleted = Doctrine.objects.from_source(Source.REMOTE_AUTH).delete()
+    _total_fit, fit_deleted = (
+        Fitting.objects.from_source(Source.REMOTE_AUTH)
+        .exclude(doctrine_fittings__doctrine__source=Source.LOCAL)
+        .delete()
+    )
+    return {
+        "doctrines_deleted": doc_deleted.get(Doctrine._meta.label, 0),
+        "fittings_deleted": fit_deleted.get(Fitting._meta.label, 0),
+        "categories_deleted": cat_deleted.get(Category._meta.label, 0),
+    }

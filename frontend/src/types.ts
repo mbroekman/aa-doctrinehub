@@ -109,3 +109,10 @@ export interface RemoteScrapeImportResult {
     fittings_count: number;
   }[];
 }
+
+export interface RemoteScrapePurgeResult {
+  ok: boolean;
+  doctrines_deleted: number;
+  fittings_deleted: number;
+  categories_deleted: number;
+}

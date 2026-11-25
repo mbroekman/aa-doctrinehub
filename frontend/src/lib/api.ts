@@ -4,6 +4,7 @@ import type {
   FittingSummary,
   RemoteScrapeImportResult,
   RemoteScrapePreview,
+  RemoteScrapePurgeResult,
   SyncSettings,
 } from "@/types";
 
@@ -70,7 +71,7 @@ export const api = {
     include_standalone_fits: boolean;
     include_categories: boolean;
     limit: number | null;
-    skip_existing: boolean;
+    overwrite_existing: boolean;
   }) =>
     request<RemoteScrapePreview>("settings/remote-scrape/", {
       method: "POST",
@@ -82,10 +83,11 @@ export const api = {
     include_standalone_fits: boolean;
     include_categories: boolean;
     limit: number | null;
-    skip_existing: boolean;
+    overwrite_existing: boolean;
   }) =>
     request<RemoteScrapeImportResult>("settings/remote-scrape/", {
       method: "POST",
       body: JSON.stringify({ ...payload, mode: "import" }),
     }),
+  remoteScrapePurge: () => request<RemoteScrapePurgeResult>("settings/remote-scrape/purge/", { method: "POST" }),
 };
