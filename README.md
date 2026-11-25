@@ -37,6 +37,14 @@ and compliance rules that assign and revoke Auth groups automatically.
        "task": "aa_doctrinehub.tasks.sync_from_fittings",
        "schedule": crontab(minute="30", hour="4"),
    }
+   CELERYBEAT_SCHEDULE["aa_doctrinehub_sync_character_snapshots"] = {
+       "task": "aa_doctrinehub.tasks.sync_character_snapshots",
+       "schedule": crontab(minute="0", hour="*/4"),
+   }
+   CELERYBEAT_SCHEDULE["aa_doctrinehub_evaluate_compliance_rules"] = {
+       "task": "aa_doctrinehub.tasks.evaluate_compliance_rules",
+       "schedule": crontab(minute="15", hour="*/4"),
+   }
    ```
 
 4. Run migrations and collect static files, then restart Auth and the Celery workers:
@@ -51,6 +59,8 @@ and compliance rules that assign and revoke Auth groups automatically.
 | Name | Task | Schedule | What it does |
 | --- | --- | --- | --- |
 | `aa_doctrinehub_sync_from_fittings` | `aa_doctrinehub.tasks.sync_from_fittings` | daily, 04:30 | Copies doctrines, fittings and categories from the Fittings app when the sync is enabled and its interval (set in the app, default 7 days) has passed. Does nothing when Fittings is not installed. |
+| `aa_doctrinehub_sync_character_snapshots` | `aa_doctrinehub.tasks.sync_character_snapshots` | every 4 hours | Syncs skills, implants, and assets from ESI for all linked characters (no external plugins). |
+| `aa_doctrinehub_evaluate_compliance_rules` | `aa_doctrinehub.tasks.evaluate_compliance_rules` | every 4 hours | Evaluates active compliance rules across all account characters and applies automatic Auth group grants/revocations. |
 
 ## Permissions
 

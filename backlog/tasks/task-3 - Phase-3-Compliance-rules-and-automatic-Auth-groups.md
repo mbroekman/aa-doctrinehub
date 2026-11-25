@@ -1,7 +1,7 @@
 ---
 id: TASK-3
 title: Phase 3: Compliance rules and automatic Auth groups
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24 21:30'
 updated_date: '2026-11-24 21:30'
@@ -22,11 +22,11 @@ Rules in the management part of the SPA link a tree of conditions (can fly fitti
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 Rule builder with AND, OR and at-least-N
-- [ ] #2 Modes: report only (default for new rules), automatic, reviewer approval
-- [ ] #3 Revocation only after DM warning and grace period; ESI errors set status unknown and never revoke
-- [ ] #4 Only grants made by the plugin are revoked (GroupGrant)
-- [ ] #5 Audit log of every grant and revocation
-- [ ] #6 Discord messages via discord_i18n in a fixed language
-- [ ] #7 First rule: SIG: Capitals
+- [x] #1 Rule builder with AND, OR and at-least-N
+- [x] #2 Modes: report only (default for new rules), automatic, reviewer approval
+- [x] #3 Revocation only after DM warning and grace period; ESI errors set status unknown and never revoke
+- [x] #4 Only grants made by the plugin are revoked (GroupGrant)
+- [x] #5 Audit log of every grant and revocation
+- [x] #6 Discord messages via discord_i18n in a fixed language
+- [x] #7 First rule: SIG: Capitals
 <!-- AC:END -->

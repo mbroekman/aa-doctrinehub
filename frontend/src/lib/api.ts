@@ -1,10 +1,20 @@
 import type {
+  AuditLogEntry,
+  ComplianceOverviewResponse,
+  ComplianceRule,
   Doctrine,
+  EligibilityStatusResponse,
   FittingDetail,
+  FittingEligibilityResponse,
   FittingSummary,
+  HangarShipMatch,
+  IndustryOrderResult,
+  NotificationSettings,
+  PendingApprovalItem,
   RemoteScrapeImportResult,
   RemoteScrapePreview,
   RemoteScrapePurgeResult,
+  SrpCompareResult,
   SyncSettings,
 } from "@/types";
 
@@ -12,6 +22,9 @@ export interface SpaConfig {
   apiPrefix: string;
   appName: string;
   canManage: boolean;
+  canViewCompliance: boolean;
+  canManageRules: boolean;
+  linkCharacterUrl: string;
   csrfToken: string;
 }
 
@@ -22,6 +35,9 @@ export function getSpaConfig(): SpaConfig {
     apiPrefix: doctrinesUrl.replace(/doctrines\/?$/, ""),
     appName: root?.dataset.appName || "Doctrines",
     canManage: root?.dataset.canManage === "true",
+    canViewCompliance: root?.dataset.canViewCompliance === "true",
+    canManageRules: root?.dataset.canManageRules === "true",
+    linkCharacterUrl: root?.dataset.linkCharacterUrl || "/doctrines/link-character/",
     csrfToken: root?.dataset.csrfToken || "",
   };
 }
@@ -160,4 +176,46 @@ export const api = {
           body: JSON.stringify({ ...payload, mode: "import" }),
         }),
   remoteScrapePurge: () => request<RemoteScrapePurgeResult>("settings/remote-scrape/purge/", { method: "POST" }),
+  eligibilityStatus: () => request<EligibilityStatusResponse>("eligibility/status/"),
+  eligibilitySync: () => request<EligibilityStatusResponse & { ok: boolean }>("eligibility/sync/", { method: "POST" }),
+  fittingEligibility: (id: number) => request<FittingEligibilityResponse>(`fittings/${id}/eligibility/`),
+  fittingSkillPlan: (id: number, target: "minimum" | "recommended" = "minimum", characterId?: number) =>
+    request<{ skill_plan: string; target: string }>(
+      `fittings/${id}/skill-plan/?target=${target}${characterId ? `&character_id=${characterId}` : ""}`,
+    ),
+  refreshFittingDogmaSkills: (id: number) =>
+    request<{ count: number }>(`fittings/${id}/skills/`, { method: "POST", body: JSON.stringify({ refresh_dogma: true }) }),
+  addFittingSkill: (
+    id: number,
+    payload: { skill_id: number; skill_name: string; required_level: number; recommended_level: number },
+  ) => request(`fittings/${id}/skills/`, { method: "POST", body: JSON.stringify(payload) }),
+  removeFittingSkill: (id: number, skill_id: number) =>
+    request(`fittings/${id}/skills/`, { method: "DELETE", body: JSON.stringify({ skill_id }) }),
+  complianceOverview: () => request<ComplianceOverviewResponse>("compliance/overview/"),
+  rules: () => request<{ rules: ComplianceRule[]; groups: { id: number; name: string }[] }>("rules/"),
+  createRule: (payload: Partial<ComplianceRule>) =>
+    request<ComplianceRule>("rules/", { method: "POST", body: JSON.stringify(payload) }),
+  updateRule: (id: number, payload: Partial<ComplianceRule>) =>
+    request<ComplianceRule>(`rules/${id}/`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteRule: (id: number) => request(`rules/${id}/`, { method: "DELETE" }),
+  evaluateRules: () => request<{ ok: boolean; rules: number; evaluations: number }>("rules/evaluate/", { method: "POST" }),
+  approvals: () => request<{ approvals: PendingApprovalItem[] }>("rules/approvals/"),
+  decideApproval: (id: number, approve: boolean, note = "") =>
+    request(`rules/approvals/${id}/decide/`, { method: "POST", body: JSON.stringify({ approve, note }) }),
+  auditLogs: () => request<{ logs: AuditLogEntry[] }>("rules/audit/"),
+  notificationSettings: () => request<NotificationSettings>("settings/notifications/"),
+  saveNotificationSettings: (payload: Partial<NotificationSettings>) =>
+    request<NotificationSettings>("settings/notifications/", { method: "PUT", body: JSON.stringify(payload) }),
+  hangarCheck: (doctrineId?: number) =>
+    request<{ ships: HangarShipMatch[] }>(`integrations/hangar-check/${doctrineId ? `?doctrine_id=${doctrineId}` : ""}`),
+  pushIndustryOrder: (doctrineId: number) =>
+    request<IndustryOrderResult>("integrations/industry-order/", {
+      method: "POST",
+      body: JSON.stringify({ doctrine_id: doctrineId }),
+    }),
+  srpCompare: (fittingId: number, killmail: Record<string, unknown>) =>
+    request<SrpCompareResult>("integrations/srp-compare/", {
+      method: "POST",
+      body: JSON.stringify({ fitting_id: fittingId, killmail }),
+    }),
 };

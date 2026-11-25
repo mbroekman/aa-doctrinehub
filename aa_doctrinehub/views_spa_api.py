@@ -5,17 +5,48 @@ from __future__ import annotations
 import json
 from typing import Any, cast
 
+from allianceauth.authentication.models import CharacterOwnership
 from django.contrib.auth.decorators import login_required, permission_required
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Group, User
 from django.db.models import Prefetch
 from django.http import HttpRequest, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from .models import Category, DoctrineFitting, Fitting, SyncSettings
+from .discord_i18n import language_choices
+from .models import (
+    Category,
+    ComplianceAuditLog,
+    ComplianceRule,
+    Doctrine,
+    DoctrineFitting,
+    Fitting,
+    FittingSkillRequirement,
+    NotificationConfig,
+    PendingApproval,
+    RuleEvaluation,
+    SyncSettings,
+)
 from .services.eft import EftParseError
+from .services.esi_sync import character_link_status, sync_character_snapshot
 from .services.fittings import import_eft, version_eft, version_multibuy
 from .services.fittings_sync import fittings_app_installed
+from .services.integrations import (
+    compare_killmail_to_fitting,
+    hangar_check_for_user,
+    push_shortages_to_industry,
+)
+from .services.rules import (
+    decide_pending_approval,
+    ensure_default_capitals_rule,
+    evaluate_all_rules,
+)
+from .services.skills import (
+    compliance_overview,
+    evaluate_fitting_for_user,
+    export_skill_plan,
+    extract_dogma_skills_for_version,
+)
 from .services.visibility import visible_doctrines, visible_fittings
 
 
@@ -204,7 +235,7 @@ def run_fittings_sync(request: HttpRequest) -> JsonResponse:
 @login_required
 @permission_required("aa_doctrinehub.manage_doctrines")
 @require_POST
-def remote_scrape(request: HttpRequest) -> HttpResponse:
+def remote_scrape(request: HttpRequest) -> HttpResponse | StreamingHttpResponse:
     """Preview or import doctrines, fittings, and categories from an external Auth."""
     from .models import Doctrine as DoctrineModel, Source as SourceChoices
     from .services.remote_scrape import (
@@ -368,3 +399,370 @@ def remote_scrape_purge(request: HttpRequest) -> JsonResponse:
 
     counts = purge_remote_auth_records()
     return JsonResponse({"ok": True, **counts})
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Eligibility, ESI snapshots, skill plans, and compliance overview
+# ---------------------------------------------------------------------------
+
+
+@login_required
+@permission_required("aa_doctrinehub.basic_access")
+@require_GET
+def eligibility_status(request: HttpRequest) -> JsonResponse:
+    """Return ESI linking and snapshot sync status for the user's characters."""
+    characters = character_link_status(_user(request))
+    all_linked = bool(characters) and all(c["has_valid_token"] for c in characters)
+    return JsonResponse({"all_linked": all_linked, "characters": characters})
+
+
+@login_required
+@permission_required("aa_doctrinehub.basic_access")
+@require_POST
+def eligibility_sync(request: HttpRequest) -> JsonResponse:
+    """Trigger an on-demand ESI snapshot sync for all characters of the current user."""
+    ownerships = CharacterOwnership.objects.filter(user=_user(request)).select_related("character")
+    for co in ownerships:
+        sync_character_snapshot(co.character)
+    characters = character_link_status(_user(request))
+    return JsonResponse({"ok": True, "characters": characters})
+
+
+@login_required
+@permission_required("aa_doctrinehub.basic_access")
+@require_GET
+def fitting_eligibility(request: HttpRequest, fitting_id: int) -> JsonResponse:
+    """Return traffic-light eligibility and skill requirements for one fitting."""
+    fitting = get_object_or_404(visible_fittings(_user(request)), pk=fitting_id)
+    version = fitting.current_version
+    if version is None:
+        return JsonResponse({"status": "unknown", "requirements": [], "characters": []})
+    reqs = list(version.skill_requirements.all())
+    ev = evaluate_fitting_for_user(version, _user(request))
+    return JsonResponse(
+        {
+            **ev,
+            "requirements": [
+                {
+                    "id": r.pk,
+                    "skill_id": r.skill_id,
+                    "skill_name": r.skill_name,
+                    "required_level": r.required_level,
+                    "recommended_level": r.recommended_level,
+                    "source": r.source,
+                }
+                for r in reqs
+            ],
+        }
+    )
+
+
+@login_required
+@permission_required("aa_doctrinehub.manage_doctrines")
+@require_http_methods(["POST", "DELETE"])
+def fitting_skills(request: HttpRequest, fitting_id: int) -> JsonResponse:
+    """Add/update a manual skill requirement, refresh dogma skills, or remove one."""
+    fitting = get_object_or_404(Fitting, pk=fitting_id)
+    version = fitting.current_version
+    if version is None:
+        return JsonResponse({"error": "Fitting has no version."}, status=400)
+    data = _json_body(request)
+
+    if request.method == "DELETE":
+        skill_id = int(data.get("skill_id") or request.GET.get("skill_id") or 0)
+        deleted, _ = FittingSkillRequirement.objects.filter(version=version, skill_id=skill_id).delete()
+        return JsonResponse({"deleted": deleted})
+
+    if data.get("refresh_dogma"):
+        reqs = extract_dogma_skills_for_version(version)
+        return JsonResponse({"count": len(reqs)})
+
+    skill_id = int(data.get("skill_id") or 0)
+    skill_name = str(data.get("skill_name") or "").strip()
+    required_level = max(1, min(5, int(data.get("required_level") or 1)))
+    recommended_level = max(required_level, min(5, int(data.get("recommended_level") or required_level)))
+    if not skill_id or not skill_name:
+        return JsonResponse({"error": "skill_id and skill_name are required."}, status=400)
+
+    req, _ = FittingSkillRequirement.objects.update_or_create(
+        version=version,
+        skill_id=skill_id,
+        defaults={
+            "skill_name": skill_name,
+            "required_level": required_level,
+            "recommended_level": recommended_level,
+            "source": FittingSkillRequirement.RequirementSource.MANUAL,
+        },
+    )
+    return JsonResponse(
+        {
+            "id": req.pk,
+            "skill_id": req.skill_id,
+            "skill_name": req.skill_name,
+            "required_level": req.required_level,
+            "recommended_level": req.recommended_level,
+            "source": req.source,
+        },
+        status=201,
+    )
+
+
+@login_required
+@permission_required("aa_doctrinehub.basic_access")
+@require_GET
+def fitting_skill_plan(request: HttpRequest, fitting_id: int) -> JsonResponse:
+    """Return an EVE Online skill plan for ``fitting_id``."""
+    fitting = get_object_or_404(visible_fittings(_user(request)), pk=fitting_id)
+    version = fitting.current_version
+    if version is None:
+        return JsonResponse({"skill_plan": ""})
+    target = "recommended" if request.GET.get("target") == "recommended" else "minimum"
+    char_id = request.GET.get("character_id")
+    snapshot = None
+    if char_id:
+        co = CharacterOwnership.objects.filter(
+            user=_user(request), character__character_id=int(char_id)
+        ).select_related("character__doctrinehub_skill_snapshot").first()
+        if co:
+            snapshot = getattr(co.character, "doctrinehub_skill_snapshot", None)
+    plan = export_skill_plan(version, snapshot=snapshot, target=target)
+    return JsonResponse({"skill_plan": plan, "target": target})
+
+
+@login_required
+@permission_required("aa_doctrinehub.view_compliance")
+@require_GET
+def compliance_overview_view(request: HttpRequest) -> JsonResponse:
+    """Return doctrine/role coverage and skill gap analysis."""
+    qs = visible_doctrines(_user(request))
+    return JsonResponse(compliance_overview(qs))
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Compliance rules, approvals, audit log, and notification settings
+# ---------------------------------------------------------------------------
+
+
+def _serialize_rule(rule: ComplianceRule) -> dict[str, Any]:
+    evals = list(rule.evaluations.all())
+    return {
+        "id": rule.pk,
+        "name": rule.name,
+        "description": rule.description,
+        "group_id": rule.group_id,
+        "group_name": rule.group.name,
+        "mode": rule.mode,
+        "is_active": rule.is_active,
+        "grace_period_hours": rule.grace_period_hours,
+        "condition_tree": rule.condition_tree,
+        "summary": {
+            "pass": sum(1 for e in evals if e.status == RuleEvaluation.Status.PASS),
+            "fail": sum(1 for e in evals if e.status == RuleEvaluation.Status.FAIL),
+            "unknown": sum(1 for e in evals if e.status == RuleEvaluation.Status.UNKNOWN),
+        },
+    }
+
+
+@login_required
+@permission_required("aa_doctrinehub.manage_rules")
+@require_http_methods(["GET", "POST"])
+def rules_collection(request: HttpRequest) -> JsonResponse:
+    """List compliance rules (seeding SIG: Capitals if requested) or create a new rule."""
+    if request.method == "GET":
+        if request.GET.get("seed_capitals") == "1" or not ComplianceRule.objects.exists():
+            ensure_default_capitals_rule()
+        rules = ComplianceRule.objects.select_related("group").prefetch_related("evaluations").all()
+        groups = [{"id": g.pk, "name": g.name} for g in Group.objects.order_by("name")]
+        return JsonResponse({"rules": [_serialize_rule(r) for r in rules], "groups": groups})
+
+    data = _json_body(request)
+    name = str(data.get("name") or "").strip()
+    group_id = data.get("group_id")
+    if not name or not group_id:
+        return JsonResponse({"error": "name and group_id are required."}, status=400)
+    group = get_object_or_404(Group, pk=int(group_id))
+    mode = str(data.get("mode") or ComplianceRule.Mode.REPORT_ONLY)
+    if mode not in set(ComplianceRule.Mode.values):
+        return JsonResponse({"error": "Invalid rule mode."}, status=400)
+    rule = ComplianceRule.objects.create(
+        name=name,
+        description=str(data.get("description") or ""),
+        group=group,
+        mode=mode,
+        is_active=bool(data.get("is_active", True)),
+        grace_period_hours=max(1, int(data.get("grace_period_hours") or 48)),
+        condition_tree=data.get("condition_tree") or {},
+    )
+    return JsonResponse(_serialize_rule(rule), status=201)
+
+
+@login_required
+@permission_required("aa_doctrinehub.manage_rules")
+@require_http_methods(["PUT", "DELETE"])
+def rule_detail(request: HttpRequest, rule_id: int) -> JsonResponse:
+    """Update or delete a compliance rule."""
+    rule = get_object_or_404(ComplianceRule.objects.select_related("group"), pk=rule_id)
+    if request.method == "DELETE":
+        rule.delete()
+        return JsonResponse({"ok": True})
+
+    data = _json_body(request)
+    if "name" in data:
+        rule.name = str(data["name"]).strip() or rule.name
+    if "description" in data:
+        rule.description = str(data["description"])
+    if "group_id" in data and data["group_id"]:
+        rule.group = get_object_or_404(Group, pk=int(data["group_id"]))
+    if "mode" in data and data["mode"] in set(ComplianceRule.Mode.values):
+        rule.mode = str(data["mode"])
+    if "is_active" in data:
+        rule.is_active = bool(data["is_active"])
+    if "grace_period_hours" in data:
+        rule.grace_period_hours = max(1, int(data["grace_period_hours"]))
+    if "condition_tree" in data and isinstance(data["condition_tree"], dict):
+        rule.condition_tree = data["condition_tree"]
+    rule.save()
+    return JsonResponse(_serialize_rule(rule))
+
+
+@login_required
+@permission_required("aa_doctrinehub.manage_rules")
+@require_POST
+def rules_evaluate(request: HttpRequest) -> JsonResponse:
+    """Run compliance rule evaluation immediately."""
+    counts = evaluate_all_rules()
+    return JsonResponse({"ok": True, **counts})
+
+
+@login_required
+@permission_required("aa_doctrinehub.manage_rules")
+@require_GET
+def rules_approvals(request: HttpRequest) -> JsonResponse:
+    """List pending reviewer approvals."""
+    qs = PendingApproval.objects.filter(status=PendingApproval.Status.PENDING).select_related(
+        "rule", "rule__group", "user"
+    )
+    return JsonResponse(
+        {
+            "approvals": [
+                {
+                    "id": a.pk,
+                    "rule_id": a.rule_id,
+                    "rule_name": a.rule.name,
+                    "group_name": a.rule.group.name,
+                    "user_id": a.user_id,
+                    "username": a.user.username,
+                    "action": a.action,
+                    "reason": a.reason,
+                    "created_at": a.created_at.isoformat(),
+                }
+                for a in qs
+            ]
+        }
+    )
+
+
+@login_required
+@permission_required("aa_doctrinehub.manage_rules")
+@require_POST
+def rule_approval_decide(request: HttpRequest, approval_id: int) -> JsonResponse:
+    """Approve or reject a pending group grant/revocation."""
+    approval = get_object_or_404(PendingApproval.objects.select_related("rule", "rule__group", "user"), pk=approval_id)
+    data = _json_body(request)
+    approve = bool(data.get("approve", True))
+    note = str(data.get("note") or "")
+    decide_pending_approval(approval, _user(request), approve=approve, note=note)
+    return JsonResponse({"ok": True, "status": approval.status})
+
+
+@login_required
+@permission_required("aa_doctrinehub.manage_rules")
+@require_GET
+def rules_audit(request: HttpRequest) -> JsonResponse:
+    """Return the latest 100 compliance audit log entries."""
+    logs = ComplianceAuditLog.objects.select_related("rule", "user", "group", "actor")[:100]
+    return JsonResponse(
+        {
+            "logs": [
+                {
+                    "id": entry.pk,
+                    "rule_name": entry.rule.name if entry.rule else "",
+                    "username": entry.user.username,
+                    "group_name": entry.group.name,
+                    "action": entry.action,
+                    "reason": entry.reason,
+                    "actor": entry.actor.username if entry.actor else "system",
+                    "created_at": entry.created_at.isoformat(),
+                }
+                for entry in logs
+            ]
+        }
+    )
+
+
+@login_required
+@permission_required("aa_doctrinehub.manage_rules")
+@require_http_methods(["GET", "PUT"])
+def notification_settings(request: HttpRequest) -> JsonResponse:
+    """Read or update Discord webhook and fixed-language settings."""
+    cfg = NotificationConfig.get_solo()
+    if request.method == "PUT":
+        data = _json_body(request)
+        if "discord_webhook_url" in data:
+            cfg.discord_webhook_url = str(data["discord_webhook_url"]).strip()
+        if "discord_language" in data:
+            cfg.discord_language = str(data["discord_language"]).strip()
+        if "dm_warnings_enabled" in data:
+            cfg.dm_warnings_enabled = bool(data["dm_warnings_enabled"])
+        cfg.save()
+    return JsonResponse(
+        {
+            "discord_webhook_url": cfg.discord_webhook_url,
+            "discord_language": cfg.discord_language,
+            "dm_warnings_enabled": cfg.dm_warnings_enabled,
+            "language_choices": [{"code": code, "label": label} for code, label in language_choices()],
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Hangar check, aa-industry shortage push, and SRP killmail compare
+# ---------------------------------------------------------------------------
+
+
+@login_required
+@permission_required("aa_doctrinehub.basic_access")
+@require_GET
+def hangar_check_view(request: HttpRequest) -> JsonResponse:
+    """Check fitted doctrine ships in the current user's hangars."""
+    doctrine_id = request.GET.get("doctrine_id")
+    ships = hangar_check_for_user(_user(request), doctrine_id=int(doctrine_id) if doctrine_id else None)
+    return JsonResponse({"ships": ships})
+
+
+@login_required
+@permission_required("aa_doctrinehub.manage_doctrines")
+@require_POST
+def industry_order_view(request: HttpRequest) -> JsonResponse:
+    """Push doctrine ship shortages to aa-industry as an order."""
+    data = _json_body(request)
+    doctrine_id = int(data.get("doctrine_id") or 0)
+    doctrine = get_object_or_404(Doctrine, pk=doctrine_id)
+    return JsonResponse(push_shortages_to_industry(doctrine, _user(request)))
+
+
+@login_required
+@permission_required("aa_doctrinehub.basic_access")
+@require_POST
+def srp_compare_view(request: HttpRequest) -> JsonResponse:
+    """Compare a killmail JSON payload against a doctrine fitting version for SRP."""
+    data = _json_body(request)
+    fitting_id = int(data.get("fitting_id") or 0)
+    killmail = data.get("killmail")
+    if not fitting_id or not isinstance(killmail, dict):
+        return JsonResponse({"error": "fitting_id and killmail JSON object are required."}, status=400)
+    fitting = get_object_or_404(visible_fittings(_user(request)), pk=fitting_id)
+    version = fitting.current_version
+    if version is None:
+        return JsonResponse({"error": "Fitting has no version."}, status=400)
+    return JsonResponse(compare_killmail_to_fitting(killmail, version))

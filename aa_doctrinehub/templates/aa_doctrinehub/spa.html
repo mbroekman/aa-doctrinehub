@@ -18,6 +18,9 @@
      data-spa-base="{% url 'aa_doctrinehub:index' %}"
      data-app-name="{{ app_name }}"
      data-can-manage="{{ can_manage|yesno:'true,false' }}"
+     data-can-view-compliance="{{ can_view_compliance|yesno:'true,false' }}"
+     data-can-manage-rules="{{ can_manage_rules|yesno:'true,false' }}"
+     data-link-character-url="{% url 'aa_doctrinehub:link_character' %}"
      data-csrf-token="{{ csrf_token }}">
 </div>
 {% endblock %}

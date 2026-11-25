@@ -116,3 +116,185 @@ export interface RemoteScrapePurgeResult {
   fittings_deleted: number;
   categories_deleted: number;
 }
+
+export type TrafficLight = "green" | "yellow" | "red" | "unknown";
+
+export interface CharacterLinkStatus {
+  character_id: number;
+  character_name: string;
+  has_valid_token: boolean;
+  sync_status: "pending" | "ok" | "error";
+  last_synced_at: string | null;
+  last_error: string;
+  total_sp: number;
+}
+
+export interface EligibilityStatusResponse {
+  all_linked: boolean;
+  characters: CharacterLinkStatus[];
+}
+
+export interface SkillRequirement {
+  id: number;
+  skill_id: number;
+  skill_name: string;
+  required_level: number;
+  recommended_level: number;
+  source: "dogma" | "manual";
+}
+
+export interface MissingSkill {
+  skill_id: number;
+  skill_name: string;
+  current_level: number;
+  required_level: number;
+  recommended_level: number;
+}
+
+export interface CharacterFittingEligibility {
+  character_id: number;
+  character_name: string;
+  status: TrafficLight;
+  missing_required: MissingSkill[];
+  missing_recommended: MissingSkill[];
+  met_required: number;
+  total_requirements: number;
+}
+
+export interface FittingEligibilityResponse {
+  status: TrafficLight;
+  best_character_id: number | null;
+  best_character_name: string | null;
+  missing_required: MissingSkill[];
+  missing_recommended: MissingSkill[];
+  met_required: number;
+  total_requirements: number;
+  characters: CharacterFittingEligibility[];
+  requirements: SkillRequirement[];
+}
+
+export interface ComplianceOverviewResponse {
+  total_members: number;
+  doctrines: {
+    id: number;
+    name: string;
+    total_members: number;
+    ready_members: number;
+    roles: {
+      role: string;
+      green: number;
+      yellow: number;
+      red: number;
+      unknown: number;
+      fittings: {
+        fitting_id: number;
+        fitting_name: string;
+        ship_type_name: string;
+        is_required: boolean;
+        target_count: number | null;
+        green: number;
+        yellow: number;
+        red: number;
+        unknown: number;
+      }[];
+    }[];
+  }[];
+  gaps: {
+    skill_id: number;
+    skill_name: string;
+    blocked_members: number;
+  }[];
+}
+
+export interface RuleConditionNode {
+  op?: "AND" | "OR" | "AT_LEAST";
+  n?: number;
+  children?: RuleConditionNode[];
+  type?: string;
+  [key: string]: unknown;
+}
+
+export interface ComplianceRule {
+  id: number;
+  name: string;
+  description: string;
+  group_id: number;
+  group_name: string;
+  mode: "report_only" | "automatic" | "reviewer_approval";
+  is_active: boolean;
+  grace_period_hours: number;
+  condition_tree: RuleConditionNode;
+  summary: {
+    pass: number;
+    fail: number;
+    unknown: number;
+  };
+}
+
+export interface PendingApprovalItem {
+  id: number;
+  rule_id: number;
+  rule_name: string;
+  group_name: string;
+  user_id: number;
+  username: string;
+  action: "grant" | "revoke";
+  reason: string;
+  created_at: string;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  rule_name: string;
+  username: string;
+  group_name: string;
+  action: string;
+  reason: string;
+  actor: string;
+  created_at: string;
+}
+
+export interface NotificationSettings {
+  discord_webhook_url: string;
+  discord_language: string;
+  dm_warnings_enabled: boolean;
+  language_choices: { code: string; label: string }[];
+}
+
+export interface HangarShipMatch {
+  character_id: number;
+  character_name: string;
+  item_id: number;
+  location_id: number;
+  ship_type_id: number;
+  ship_type_name: string;
+  fitting_id: number;
+  fitting_name: string;
+  match_status: "full" | "partial" | "hull_only";
+  match_pct: number;
+}
+
+export interface IndustryOrderResult {
+  pushed: number;
+  order_id?: number;
+  message: string;
+  shortages: {
+    fitting_id: number;
+    fitting_name: string;
+    ship_type_id: number | null;
+    ship_type_name: string;
+    target_count: number;
+    owned_count: number;
+    shortage: number;
+  }[];
+}
+
+export interface SrpCompareResult {
+  hull_match: boolean;
+  killmail_ship_type_id: number;
+  expected_ship_type_id: number | null;
+  compliance_pct: number;
+  matched: { type_id: number; type_name: string; quantity: number }[];
+  missing: { type_id: number; type_name: string; quantity: number }[];
+  extra: { type_id: number; type_name: string; quantity: number }[];
+}

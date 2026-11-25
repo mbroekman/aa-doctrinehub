@@ -9,7 +9,9 @@ from celery import shared_task
 from django.utils import timezone
 
 from .models import SyncSettings
+from .services.esi_sync import sync_all_characters
 from .services.fittings_sync import sync_from_fittings_app
+from .services.rules import evaluate_all_rules
 
 logger = logging.getLogger(__name__)
 
@@ -36,3 +38,17 @@ def sync_from_fittings(force: bool = False) -> str:
         return "skipped"
     result = sync_from_fittings_app()
     return result.summary() if result else "fittings app not installed"
+
+
+@shared_task(name="aa_doctrinehub.tasks.sync_character_snapshots")
+def sync_character_snapshots() -> str:
+    """Sync character skills, implants, and assets from ESI every 4 hours."""
+    counts = sync_all_characters()
+    return f"ok={counts['ok']} error={counts['error']}"
+
+
+@shared_task(name="aa_doctrinehub.tasks.evaluate_compliance_rules")
+def evaluate_compliance_rules() -> str:
+    """Evaluate all active compliance rules and apply automatic group grants/revocations."""
+    counts = evaluate_all_rules()
+    return f"rules={counts['rules']} evaluations={counts['evaluations']}"

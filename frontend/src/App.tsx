@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Search, X } from "lucide-react";
+import { Link2, Plus, RefreshCw, Search, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ComplianceView } from "@/components/ComplianceView";
 import { FittingDialog } from "@/components/FittingDialog";
 import { ImportDialog } from "@/components/ImportDialog";
+import { IntegrationsView } from "@/components/IntegrationsView";
+import { RulesView } from "@/components/RulesView";
 import { ShipIcon } from "@/components/ShipIcon";
 import { SourceBadge } from "@/components/SourceBadge";
 import { SyncSettingsView } from "@/components/SyncSettingsView";
 import { api, getSpaConfig } from "@/lib/api";
-import type { Doctrine, FittingSummary } from "@/types";
+import type { Doctrine, EligibilityStatusResponse, FittingSummary } from "@/types";
 
 const STATUS_LABEL: Record<Doctrine["status"], string> = {
   draft: "Draft",
@@ -93,6 +96,8 @@ export function App() {
   const [sourceFilter, setSourceFilter] = useState("all");
   const [openFitting, setOpenFitting] = useState<number | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [eligStatus, setEligStatus] = useState<EligibilityStatusResponse | null>(null);
+  const [syncingEsi, setSyncingEsi] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(() => {
@@ -102,7 +107,17 @@ export function App() {
         setFittings(f);
       })
       .catch((e: Error) => setError(e.message));
+    api.eligibilityStatus().then(setEligStatus).catch(() => undefined);
   }, []);
+
+  const handleSyncEsi = () => {
+    setSyncingEsi(true);
+    api
+      .eligibilitySync()
+      .then((res) => setEligStatus({ all_linked: res.characters.every((c) => c.has_valid_token), characters: res.characters }))
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setSyncingEsi(false));
+  };
 
   useEffect(load, [load]);
 
@@ -228,6 +243,33 @@ export function App() {
         )}
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
+      {eligStatus && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">ESI Characters:</span>
+            {eligStatus.characters.map((c) => (
+              <Badge key={c.character_id} variant={c.has_valid_token ? "secondary" : "destructive"}>
+                {c.character_name} {c.has_valid_token ? `(${c.sync_status})` : "(missing scopes)"}
+              </Badge>
+            ))}
+            {!eligStatus.characters.length && <span className="text-muted-foreground">No characters linked yet.</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            {!eligStatus.all_linked && (
+              <Button size="sm" variant="default" asChild>
+                <a href={config.linkCharacterUrl}>
+                  <Link2 className="mr-1 h-3.5 w-3.5" />
+                  Link Character
+                </a>
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={handleSyncEsi} disabled={syncingEsi}>
+              <RefreshCw className={`mr-1 h-3.5 w-3.5 ${syncingEsi ? "animate-spin" : ""}`} />
+              Sync Skills
+            </Button>
+          </div>
+        </div>
+      )}
       <Tabs defaultValue="doctrines">
         <TabsList>
           <TabsTrigger value="doctrines">
@@ -236,6 +278,9 @@ export function App() {
           <TabsTrigger value="fittings">
             Fittings ({hasActiveFilter ? `${shownFittings.length}/${fittings.length}` : fittings.length})
           </TabsTrigger>
+          {config.canViewCompliance && <TabsTrigger value="compliance">Compliance</TabsTrigger>}
+          {config.canManageRules && <TabsTrigger value="rules">Rules &amp; Groups</TabsTrigger>}
+          <TabsTrigger value="integrations">Hangars &amp; SRP</TabsTrigger>
           {config.canManage && <TabsTrigger value="settings">Settings</TabsTrigger>}
         </TabsList>
         <TabsContent value="doctrines" className="grid gap-4 lg:grid-cols-2">
@@ -250,6 +295,19 @@ export function App() {
           ) : (
             <p className="text-sm text-muted-foreground">No fittings to show.</p>
           )}
+        </TabsContent>
+        {config.canViewCompliance && (
+          <TabsContent value="compliance">
+            <ComplianceView />
+          </TabsContent>
+        )}
+        {config.canManageRules && (
+          <TabsContent value="rules">
+            <RulesView />
+          </TabsContent>
+        )}
+        <TabsContent value="integrations">
+          <IntegrationsView doctrines={doctrines} fittings={fittings} canManage={config.canManage} />
         </TabsContent>
         {config.canManage && (
           <TabsContent value="settings">

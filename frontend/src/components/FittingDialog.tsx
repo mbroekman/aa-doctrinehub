@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Copy } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ShipIcon } from "@/components/ShipIcon";
 import { SourceBadge } from "@/components/SourceBadge";
 import { api } from "@/lib/api";
-import type { FittingDetail, FittingItem } from "@/types";
+import type { FittingDetail, FittingEligibilityResponse, FittingItem, TrafficLight } from "@/types";
 
 const SECTIONS: { prefix: string; label: string }[] = [
   { prefix: "HiSlot", label: "High slots" },
@@ -42,15 +43,31 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
+const LIGHT_STYLE: Record<TrafficLight, { label: string; className: string }> = {
+  green: { label: "Can fly (Recommended)", className: "bg-emerald-600 text-white" },
+  yellow: { label: "Can fly (Minimum)", className: "bg-amber-500 text-black" },
+  red: { label: "Missing skills", className: "bg-destructive text-destructive-foreground" },
+  unknown: { label: "Skills unknown", className: "bg-secondary text-secondary-foreground" },
+};
+
 export function FittingDialog({ fittingId, onClose }: { fittingId: number | null; onClose: () => void }) {
   const [fitting, setFitting] = useState<FittingDetail | null>(null);
+  const [elig, setElig] = useState<FittingEligibilityResponse | null>(null);
+  const [skillPlan, setSkillPlan] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (fittingId === null) return;
     setFitting(null);
+    setElig(null);
+    setSkillPlan("");
     setError("");
     api.fitting(fittingId).then(setFitting).catch((e: Error) => setError(e.message));
+    api.fittingEligibility(fittingId).then(setElig).catch(() => undefined);
+    api
+      .fittingSkillPlan(fittingId, "minimum")
+      .then((res) => setSkillPlan(res.skill_plan))
+      .catch(() => undefined);
   }, [fittingId]);
 
   return (
@@ -73,10 +90,34 @@ export function FittingDialog({ fittingId, onClose }: { fittingId: number | null
         {fitting?.version && (
           <div className="space-y-4">
             {fitting.description && <p className="text-sm text-muted-foreground">{fitting.description}</p>}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <CopyButton text={fitting.version.eft} label="Copy EFT" />
               <CopyButton text={fitting.version.multibuy} label="Copy multibuy" />
+              {skillPlan && <CopyButton text={skillPlan} label="Copy Skill Plan" />}
+              {elig && (
+                <Badge className={LIGHT_STYLE[elig.status].className}>{LIGHT_STYLE[elig.status].label}</Badge>
+              )}
             </div>
+            {elig && elig.characters.length > 0 && (
+              <div className="rounded-md border border-border p-2 text-xs">
+                <div className="mb-1 font-semibold uppercase text-muted-foreground">Character Eligibility</div>
+                <div className="flex flex-wrap gap-2">
+                  {elig.characters.map((c) => (
+                    <Badge key={c.character_id} className={LIGHT_STYLE[c.status].className}>
+                      {c.character_name}: {c.status.toUpperCase()}
+                    </Badge>
+                  ))}
+                </div>
+                {elig.missing_required.length > 0 && (
+                  <p className="mt-1.5 text-destructive">
+                    Missing:{" "}
+                    {elig.missing_required
+                      .map((m) => `${m.skill_name} ${m.required_level} (have ${m.current_level})`)
+                      .join(", ")}
+                  </p>
+                )}
+              </div>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
               {SECTIONS.map(({ prefix, label }) => {
                 const items = itemsFor(fitting.version!.items, prefix);
