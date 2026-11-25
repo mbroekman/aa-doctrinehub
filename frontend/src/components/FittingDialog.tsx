@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -53,6 +53,7 @@ const LIGHT_STYLE: Record<TrafficLight, { label: string; className: string }> = 
 export function FittingDialog({ fittingId, onClose }: { fittingId: number | null; onClose: () => void }) {
   const [fitting, setFitting] = useState<FittingDetail | null>(null);
   const [elig, setElig] = useState<FittingEligibilityResponse | null>(null);
+  const [showElig, setShowElig] = useState(false);
   const [skillPlan, setSkillPlan] = useState("");
   const [error, setError] = useState("");
 
@@ -60,6 +61,7 @@ export function FittingDialog({ fittingId, onClose }: { fittingId: number | null
     if (fittingId === null) return;
     setFitting(null);
     setElig(null);
+    setShowElig(false);
     setSkillPlan("");
     setError("");
     api.fitting(fittingId).then(setFitting).catch((e: Error) => setError(e.message));
@@ -100,21 +102,32 @@ export function FittingDialog({ fittingId, onClose }: { fittingId: number | null
             </div>
             {elig && elig.characters.length > 0 && (
               <div className="rounded-md border border-border p-2 text-xs">
-                <div className="mb-1 font-semibold uppercase text-muted-foreground">Character Eligibility</div>
-                <div className="flex flex-wrap gap-2">
-                  {elig.characters.map((c) => (
-                    <Badge key={c.character_id} className={LIGHT_STYLE[c.status].className}>
-                      {c.character_name}: {c.status.toUpperCase()}
-                    </Badge>
-                  ))}
-                </div>
-                {elig.missing_required.length > 0 && (
-                  <p className="mt-1.5 text-destructive">
-                    Missing:{" "}
-                    {elig.missing_required
-                      .map((m) => `${m.skill_name} ${m.required_level} (have ${m.current_level})`)
-                      .join(", ")}
-                  </p>
+                <button
+                  type="button"
+                  onClick={() => setShowElig((prev) => !prev)}
+                  className="flex w-full items-center justify-between font-semibold uppercase text-muted-foreground hover:text-foreground"
+                >
+                  <span>Character Eligibility ({elig.characters.length})</span>
+                  {showElig ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                </button>
+                {showElig && (
+                  <div className="mt-2 space-y-1.5">
+                    <div className="flex flex-wrap gap-2">
+                      {elig.characters.map((c) => (
+                        <Badge key={c.character_id} className={LIGHT_STYLE[c.status].className}>
+                          {c.character_name}: {c.status.toUpperCase()}
+                        </Badge>
+                      ))}
+                    </div>
+                    {elig.missing_required.length > 0 && (
+                      <p className="text-destructive">
+                        Missing:{" "}
+                        {elig.missing_required
+                          .map((m) => `${m.skill_name} ${m.required_level} (have ${m.current_level})`)
+                          .join(", ")}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             )}
