@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import type {
-  AuditLogEntry,
   ComplianceRule,
   Doctrine,
   FittingSummary,
@@ -508,7 +507,6 @@ export function RulesView({
   const [rules, setRules] = useState<ComplianceRule[]>([]);
   const [groups, setGroups] = useState<{ id: number; name: string }[]>([]);
   const [approvals, setApprovals] = useState<PendingApprovalItem[]>([]);
-  const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [notif, setNotif] = useState<NotificationSettings | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -550,13 +548,12 @@ export function RulesView({
 
   const load = useCallback(() => {
     setError("");
-    Promise.all([api.rules(), api.approvals(), api.auditLogs(), api.notificationSettings()])
-      .then(([r, a, l, n]) => {
+    Promise.all([api.rules(), api.approvals(), api.notificationSettings()])
+      .then(([r, a, n]) => {
         setRules(r.rules);
         setGroups(r.groups);
         setGroupId((prev) => prev || (r.groups[0]?.id ?? 0));
         setApprovals(a.approvals);
-        setLogs(l.logs);
         setNotif(n);
       })
       .catch((e: Error) => setError(e.message));
@@ -876,15 +873,55 @@ export function RulesView({
                                 {ev.grace_until ? ` · grace until ${new Date(ev.grace_until).toLocaleString()}` : ""}
                               </span>
                             </div>
-                            {ev.reasons.length > 0 && (
-                              <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-muted-foreground">
-                                {ev.reasons
-                                  .flatMap((reason) => reason.split(/\s*\|\s*|\s*;\s*/))
-                                  .filter(Boolean)
-                                  .map((part, i) => (
-                                    <li key={i}>{part}</li>
-                                  ))}
-                              </ul>
+                            {ev.items && ev.items.length > 0 ? (
+                              <div className="mt-2 overflow-x-auto">
+                                <table className="w-full text-left text-xs">
+                                  <thead>
+                                    <tr className="border-b border-border text-[11px] uppercase text-muted-foreground">
+                                      <th className="py-1 pr-3">Doctrine</th>
+                                      <th className="py-1 pr-3">Ship</th>
+                                      <th className="py-1 pr-3">Can fly</th>
+                                      <th className="py-1">In structure</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {ev.items.map((item, idx) => (
+                                      <tr key={idx} className="border-b border-border/40 last:border-b-0">
+                                        <td className="py-1 pr-3 text-muted-foreground">{item.doctrine}</td>
+                                        <td className="py-1 pr-3 font-medium">{item.ship}</td>
+                                        <td className="py-1 pr-3">
+                                          <Badge variant={item.can_fly ? "default" : "destructive"}>
+                                            {item.can_fly ? "Yes" : "No"}
+                                          </Badge>
+                                          {item.detail && (
+                                            <div className="mt-0.5 text-[11px] text-destructive">{item.detail}</div>
+                                          )}
+                                        </td>
+                                        <td className="py-1">
+                                          {item.in_structure === null ? (
+                                            <span className="text-muted-foreground">Not checked</span>
+                                          ) : (
+                                            <Badge variant={item.in_structure ? "default" : "destructive"}>
+                                              {item.in_structure ? "Yes" : "No"}
+                                            </Badge>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              ev.reasons.length > 0 && (
+                                <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-muted-foreground">
+                                  {ev.reasons
+                                    .flatMap((reason) => reason.split(/\s*\|\s*|\s*;\s*/))
+                                    .filter(Boolean)
+                                    .map((part, i) => (
+                                      <li key={i}>{part}</li>
+                                    ))}
+                                </ul>
+                              )
                             )}
                           </div>
                         ))}
@@ -898,78 +935,32 @@ export function RulesView({
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Pending Reviewer Approvals ({approvals.length})</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {approvals.map((a) => (
-              <div key={a.id} className="flex items-center justify-between gap-2 rounded-md border border-border p-2 text-sm">
-                <div>
-                  <span className="font-medium">{a.username}</span>{" "}
-                  <Badge variant={a.action === "grant" ? "default" : "destructive"}>{a.action}</Badge>{" "}
-                  <span>{a.group_name}</span>
-                  <div className="text-xs text-muted-foreground">{a.reason}</div>
-                </div>
-                <div className="flex gap-1">
-                  <Button size="sm" variant="outline" onClick={() => void api.decideApproval(a.id, true).then(load)}>
-                    <Check className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => void api.decideApproval(a.id, false).then(load)}>
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Pending Reviewer Approvals ({approvals.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {approvals.map((a) => (
+            <div key={a.id} className="flex items-center justify-between gap-2 rounded-md border border-border p-2 text-sm">
+              <div>
+                <span className="font-medium">{a.username}</span>{" "}
+                <Badge variant={a.action === "grant" ? "default" : "destructive"}>{a.action}</Badge>{" "}
+                <span>{a.group_name}</span>
+                <div className="text-xs text-muted-foreground">{a.reason}</div>
               </div>
-            ))}
-            {!approvals.length && <p className="text-sm text-muted-foreground">No pending approvals.</p>}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Audit Log</CardTitle>
-          </CardHeader>
-          <CardContent className="max-h-72 space-y-2 overflow-y-auto text-xs">
-            {logs.map((l) => (
-              <div key={l.id} className="rounded-md border border-border/60 p-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5">
-                    <Badge
-                      variant={
-                        l.action === "granted" || l.action === "approved"
-                          ? "default"
-                          : l.action === "revoked" || l.action === "rejected"
-                            ? "destructive"
-                            : "secondary"
-                      }
-                    >
-                      {l.action.toUpperCase()}
-                    </Badge>
-                    <span className="font-medium">{l.username}</span>
-                    <span className="text-muted-foreground">→ {l.group_name}</span>
-                    {l.rule_name && <span className="text-muted-foreground">({l.rule_name})</span>}
-                  </div>
-                  <span className="text-[11px] text-muted-foreground">
-                    {new Date(l.created_at).toLocaleString()} · by {l.actor}
-                  </span>
-                </div>
-                {l.reason && (
-                  <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-muted-foreground">
-                    {l.reason
-                      .split(/\s*\|\s*|\s*;\s*/)
-                      .filter(Boolean)
-                      .map((part, i) => (
-                        <li key={i}>{part}</li>
-                      ))}
-                  </ul>
-                )}
+              <div className="flex gap-1">
+                <Button size="sm" variant="outline" onClick={() => void api.decideApproval(a.id, true).then(load)}>
+                  <Check className="h-3.5 w-3.5" />
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => void api.decideApproval(a.id, false).then(load)}>
+                  <X className="h-3.5 w-3.5" />
+                </Button>
               </div>
-            ))}
-            {!logs.length && <p className="text-sm text-muted-foreground">No audit entries yet.</p>}
-          </CardContent>
-        </Card>
-      </div>
+            </div>
+          ))}
+          {!approvals.length && <p className="text-sm text-muted-foreground">No pending approvals.</p>}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -233,6 +233,13 @@ export interface ComplianceRule {
     username: string;
     status: "pass" | "fail" | "unknown";
     reasons: string[];
+    items?: {
+      doctrine: string;
+      ship: string;
+      can_fly: boolean | null;
+      in_structure: boolean | null;
+      detail: string;
+    }[];
     grace_until: string | null;
     evaluated_at: string | null;
   }[];

@@ -92,7 +92,12 @@ def _format_missing_skills(best: dict[str, Any], level: str) -> str:
     return "Missing skills: " + ", ".join(parts) + suffix
 
 
-def _eval_leaf(node: dict[str, Any], user: User, snapshots: list[CharacterSkillSnapshot]) -> tuple[str, str]:
+def _eval_leaf(
+    node: dict[str, Any],
+    user: User,
+    snapshots: list[CharacterSkillSnapshot],
+    items_out: list[dict[str, Any]] | None = None,
+) -> tuple[str, str]:
     ctype = str(node.get("type", ""))
 
     if ctype == "can_fly_fitting":
@@ -112,11 +117,23 @@ def _eval_leaf(node: dict[str, Any], user: User, snapshots: list[CharacterSkillS
         ok_statuses = {"green"} if level == "recommended" else {"green", "yellow"}
         if best["status"] == "unknown":
             return UNKNOWN, "Skill snapshot unknown"
+        can_fly = best["status"] in ok_statuses
+        in_structure = _user_has_ship_in_structure(snapshots, fitting.ship_type_id) if require_ship else None
         issues: list[str] = []
-        if best["status"] not in ok_statuses:
+        if not can_fly:
             issues.append(f"{fitting.ship_type_name} ({fitting.name}): {_format_missing_skills(best, level)}")
-        if require_ship and not _user_has_ship_in_structure(snapshots, fitting.ship_type_id):
+        if require_ship and not in_structure:
             issues.append(f"No {fitting.ship_type_name} present in a player structure")
+        if items_out is not None:
+            items_out.append(
+                {
+                    "doctrine": "—",
+                    "ship": f"{fitting.ship_type_name} ({fitting.name})",
+                    "can_fly": can_fly,
+                    "in_structure": in_structure,
+                    "detail": "" if can_fly else _format_missing_skills(best, level),
+                }
+            )
         if issues:
             return FAIL, " | ".join(issues)
         return PASS, f"Can fly {fitting.ship_type_name} ({fitting.name}) & ship in structure"
@@ -148,14 +165,26 @@ def _eval_leaf(node: dict[str, Any], user: User, snapshots: list[CharacterSkillS
             ok_statuses = {"green"} if level == "recommended" else {"green", "yellow"}
             if best["status"] == "unknown":
                 return UNKNOWN, "Skill snapshot unknown"
+            can_fly = best["status"] in ok_statuses
+            in_structure = _user_has_ship_in_structure(snapshots, df.fitting.ship_type_id) if require_ship else None
             issues = []
-            if best["status"] not in ok_statuses:
+            if not can_fly:
                 issues.append(
                     f"{doctrine.name} / {df.fitting.ship_type_name} ({df.fitting.name}): "
                     f"{_format_missing_skills(best, level)}"
                 )
-            if require_ship and not _user_has_ship_in_structure(snapshots, df.fitting.ship_type_id):
+            if require_ship and not in_structure:
                 issues.append(f"{doctrine.name}: no {df.fitting.ship_type_name} in a player structure")
+            if items_out is not None:
+                items_out.append(
+                    {
+                        "doctrine": doctrine.name,
+                        "ship": f"{df.fitting.ship_type_name} ({df.fitting.name})",
+                        "can_fly": can_fly,
+                        "in_structure": in_structure,
+                        "detail": "" if can_fly else _format_missing_skills(best, level),
+                    }
+                )
             if issues:
                 return FAIL, " | ".join(issues)
             return PASS, f"{doctrine.name}: can fly {df.fitting.name} & ship in structure"
@@ -175,14 +204,24 @@ def _eval_leaf(node: dict[str, Any], user: User, snapshots: list[CharacterSkillS
                 key=lambda e: STATUS_RANK[e["status"]],
             )
             has_skills = best["status"] in {"green", "yellow"}
-            has_ship = (not require_ship) or _user_has_ship_in_structure(snapshots, df.fitting.ship_type_id)
-            if has_skills and has_ship:
+            has_ship = _user_has_ship_in_structure(snapshots, df.fitting.ship_type_id) if require_ship else None
+            if items_out is not None:
+                items_out.append(
+                    {
+                        "doctrine": doctrine.name,
+                        "ship": f"{df.fitting.ship_type_name} ({df.fitting.name})",
+                        "can_fly": has_skills,
+                        "in_structure": has_ship,
+                        "detail": "" if has_skills else _format_missing_skills(best, "minimum"),
+                    }
+                )
+            if has_skills and (has_ship is None or has_ship):
                 flyable += 1
             else:
                 fit_reasons: list[str] = []
                 if not has_skills:
                     fit_reasons.append(_format_missing_skills(best, "minimum"))
-                if not has_ship:
+                if require_ship and not has_ship:
                     fit_reasons.append("no ship in structure")
                 fail_notes.append(f"{df.fitting.ship_type_name} ({df.fitting.name}): {', '.join(fit_reasons)}")
         pct = (flyable / len(req_dfs)) * 100.0
@@ -286,6 +325,7 @@ def evaluate_condition_tree(
     tree: dict[str, Any],
     user: User,
     snapshots: list[CharacterSkillSnapshot] | None = None,
+    items_out: list[dict[str, Any]] | None = None,
 ) -> tuple[str, list[str]]:
     """Evaluate a recursive AND/OR/AT_LEAST condition tree for ``user``."""
     snaps = snapshots if snapshots is not None else _user_snapshots(user)
@@ -294,14 +334,14 @@ def evaluate_condition_tree(
 
     op = str(tree.get("op", "")).upper()
     if not op:
-        status, reason = _eval_leaf(tree, user, snaps)
+        status, reason = _eval_leaf(tree, user, snaps, items_out=items_out)
         return status, [reason]
 
     children = tree.get("children") or []
     if not isinstance(children, list) or not children:
         return UNKNOWN, ["Condition group has no children"]
 
-    results = [evaluate_condition_tree(child, user, snaps) for child in children]
+    results = [evaluate_condition_tree(child, user, snaps, items_out=items_out) for child in children]
     statuses = [r[0] for r in results]
     reasons = [msg for _st, msgs in results for msg in msgs]
 
@@ -373,10 +413,11 @@ def _send_webhook(message: str, config: NotificationConfig) -> None:
 @transaction.atomic
 def apply_rule_for_user(rule: ComplianceRule, user: User) -> RuleEvaluation:
     """Evaluate ``rule`` for ``user`` and apply group grants/revocations/approvals."""
-    status, reasons = evaluate_condition_tree(rule.condition_tree, user)
+    items: list[dict[str, Any]] = []
+    status, reasons = evaluate_condition_tree(rule.condition_tree, user, items_out=items)
     evaluation, _ = RuleEvaluation.objects.get_or_create(rule=rule, user=user)
     evaluation.status = status
-    evaluation.details = {"reasons": reasons}
+    evaluation.details = {"reasons": reasons, "items": items}
 
     now = timezone.now()
     active_grant = GroupGrant.objects.filter(rule=rule, user=user, group=rule.group, revoked_at__isnull=True).first()

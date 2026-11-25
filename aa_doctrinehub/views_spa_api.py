@@ -618,6 +618,7 @@ def _serialize_rule(rule: ComplianceRule) -> dict[str, Any]:
                 "username": e.user.username,
                 "status": e.status,
                 "reasons": e.details.get("reasons", []) if isinstance(e.details, dict) else [],
+                "items": e.details.get("items", []) if isinstance(e.details, dict) else [],
                 "grace_until": e.grace_until.isoformat() if e.grace_until else None,
                 "evaluated_at": e.evaluated_at.isoformat() if e.evaluated_at else None,
             }
