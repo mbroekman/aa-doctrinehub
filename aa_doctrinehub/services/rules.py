@@ -65,6 +65,33 @@ def _user_has_ship_in_structure(snapshots: list[CharacterSkillSnapshot], ship_ty
     ).exists()
 
 
+def _skill_name(skill_id: int) -> str:
+    try:
+        from eveuniverse.models import EveType
+
+        name = EveType.objects.filter(id=skill_id).values_list("name", flat=True).first()
+        if name:
+            return str(name)
+    except ImportError:
+        pass
+    return f"Skill {skill_id}"
+
+
+def _format_missing_skills(best: dict[str, Any], level: str) -> str:
+    missing = list(best.get("missing_required") or [])
+    if level == "recommended":
+        missing.extend(best.get("missing_recommended") or [])
+    if not missing:
+        return "missing required skills"
+    parts = [
+        f"{m['skill_name']} {m['recommended_level'] if level == 'recommended' else m['required_level']} "
+        f"(have {m['current_level']})"
+        for m in missing[:6]
+    ]
+    suffix = f" (+{len(missing) - 6} more)" if len(missing) > 6 else ""
+    return "Missing skills: " + ", ".join(parts) + suffix
+
+
 def _eval_leaf(node: dict[str, Any], user: User, snapshots: list[CharacterSkillSnapshot]) -> tuple[str, str]:
     ctype = str(node.get("type", ""))
 
@@ -85,11 +112,14 @@ def _eval_leaf(node: dict[str, Any], user: User, snapshots: list[CharacterSkillS
         ok_statuses = {"green"} if level == "recommended" else {"green", "yellow"}
         if best["status"] == "unknown":
             return UNKNOWN, "Skill snapshot unknown"
+        issues: list[str] = []
         if best["status"] not in ok_statuses:
-            return FAIL, f"Cannot fly {fitting.name} (missing skills)"
+            issues.append(f"{fitting.ship_type_name} ({fitting.name}): {_format_missing_skills(best, level)}")
         if require_ship and not _user_has_ship_in_structure(snapshots, fitting.ship_type_id):
-            return FAIL, f"Ship {fitting.ship_type_name} not present in a structure"
-        return PASS, f"Can fly {fitting.name}"
+            issues.append(f"No {fitting.ship_type_name} present in a player structure")
+        if issues:
+            return FAIL, " | ".join(issues)
+        return PASS, f"Can fly {fitting.ship_type_name} ({fitting.name}) & ship in structure"
 
     if ctype == "doctrine_coverage":
         doctrine_id = int(node.get("doctrine_id") or 0)
@@ -118,30 +148,50 @@ def _eval_leaf(node: dict[str, Any], user: User, snapshots: list[CharacterSkillS
             ok_statuses = {"green"} if level == "recommended" else {"green", "yellow"}
             if best["status"] == "unknown":
                 return UNKNOWN, "Skill snapshot unknown"
+            issues = []
             if best["status"] not in ok_statuses:
-                return FAIL, f"{doctrine.name}: cannot fly {df.fitting.name} (missing skills)"
+                issues.append(
+                    f"{doctrine.name} / {df.fitting.ship_type_name} ({df.fitting.name}): "
+                    f"{_format_missing_skills(best, level)}"
+                )
             if require_ship and not _user_has_ship_in_structure(snapshots, df.fitting.ship_type_id):
-                return FAIL, f"{doctrine.name}: {df.fitting.ship_type_name} not present in a structure"
-            return PASS, f"{doctrine.name}: can fly {df.fitting.name}"
+                issues.append(f"{doctrine.name}: no {df.fitting.ship_type_name} in a player structure")
+            if issues:
+                return FAIL, " | ".join(issues)
+            return PASS, f"{doctrine.name}: can fly {df.fitting.name} & ship in structure"
+
         req_dfs = [df for df in doctrine.doctrine_fittings.all() if df.is_required and df.fitting.current_version]
         if not req_dfs:
             return PASS, f"{doctrine.name}: no required fittings"
         flyable = 0
+        fail_notes: list[str] = []
         for df in req_dfs:
             ver = df.fitting.current_version
             if ver is None:
                 continue
             reqs = list(ver.skill_requirements.all())
-            best_status = max(
-                (evaluate_fitting_for_snapshot(reqs, s)["status"] for s in snapshots),
-                key=lambda st: STATUS_RANK[st],
+            best = max(
+                (evaluate_fitting_for_snapshot(reqs, s) for s in snapshots),
+                key=lambda e: STATUS_RANK[e["status"]],
             )
-            has_skills = best_status in {"green", "yellow"}
+            has_skills = best["status"] in {"green", "yellow"}
             has_ship = (not require_ship) or _user_has_ship_in_structure(snapshots, df.fitting.ship_type_id)
             if has_skills and has_ship:
                 flyable += 1
+            else:
+                fit_reasons: list[str] = []
+                if not has_skills:
+                    fit_reasons.append(_format_missing_skills(best, "minimum"))
+                if not has_ship:
+                    fit_reasons.append("no ship in structure")
+                fail_notes.append(f"{df.fitting.ship_type_name} ({df.fitting.name}): {', '.join(fit_reasons)}")
         pct = (flyable / len(req_dfs)) * 100.0
-        return (PASS if pct >= min_pct else FAIL), f"{doctrine.name}: {pct:.0f}% (need {min_pct:.0f}%)"
+        if pct >= min_pct:
+            return PASS, f"{doctrine.name}: {pct:.0f}% ready (need {min_pct:.0f}%)"
+        detail = "; ".join(fail_notes[:4])
+        if len(fail_notes) > 4:
+            detail += f" (+{len(fail_notes) - 4} more)"
+        return FAIL, f"{doctrine.name}: {pct:.0f}% ready (need {min_pct:.0f}%) | {detail}"
 
     if ctype == "skill":
         skill_id = int(node.get("skill_id") or 0)
@@ -149,18 +199,27 @@ def _eval_leaf(node: dict[str, Any], user: User, snapshots: list[CharacterSkillS
         if not snapshots:
             return UNKNOWN, "No synced skill snapshot"
         best_lvl = 0
+        sname = ""
         for snap in snapshots:
             for sk in snap.skills.all():
-                if sk.skill_id == skill_id and sk.active_skill_level > best_lvl:
-                    best_lvl = sk.active_skill_level
-        return (PASS if best_lvl >= min_level else FAIL), f"Skill {skill_id}: {best_lvl}/{min_level}"
+                if sk.skill_id == skill_id:
+                    if sk.skill_name:
+                        sname = sk.skill_name
+                    if sk.active_skill_level > best_lvl:
+                        best_lvl = sk.active_skill_level
+        label = sname or _skill_name(skill_id)
+        if best_lvl >= min_level:
+            return PASS, f"Skill {label}: {best_lvl}/{min_level}"
+        return FAIL, f"Missing skill: {label} {min_level} (have {best_lvl})"
 
     if ctype == "total_sp":
         min_sp = int(node.get("min_sp") or 0)
         if not snapshots:
             return UNKNOWN, "No synced skill snapshot"
         max_sp = max(s.total_sp for s in snapshots)
-        return (PASS if max_sp >= min_sp else FAIL), f"Max SP: {max_sp:,}/{min_sp:,}"
+        if max_sp >= min_sp:
+            return PASS, f"Total SP: {max_sp:,} / {min_sp:,}"
+        return FAIL, f"Total SP too low: {max_sp:,} / {min_sp:,}"
 
     if ctype == "ship_owned":
         ship_type_id = int(node.get("ship_type_id") or 0)

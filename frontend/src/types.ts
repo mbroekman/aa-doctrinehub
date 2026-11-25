@@ -229,6 +229,13 @@ export interface ComplianceRule {
     fail: number;
     unknown: number;
   };
+  evaluations?: {
+    username: string;
+    status: "pass" | "fail" | "unknown";
+    reasons: string[];
+    grace_until: string | null;
+    evaluated_at: string | null;
+  }[];
 }
 
 export interface PendingApprovalItem {

@@ -802,39 +802,60 @@ export function RulesView({
         </CardHeader>
         <CardContent className="space-y-2">
           {rules.map((r) => (
-            <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-2.5 text-sm">
-              <div>
-                <div className="font-medium">
-                  {r.name} <span className="text-muted-foreground">→ {r.group_name}</span>
+            <div key={r.id} className="space-y-2 rounded-md border border-border p-2.5 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="font-medium">
+                    {r.name} <span className="text-muted-foreground">→ {r.group_name}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Mode: {r.mode} · Grace: {r.grace_period_hours}h · Pass {r.summary.pass} / Fail {r.summary.fail} / Unknown {r.summary.unknown}
+                  </div>
                 </div>
-                <div className="text-xs text-muted-foreground">
-                  Mode: {r.mode} · Grace: {r.grace_period_hours}h · Pass {r.summary.pass} / Fail {r.summary.fail} / Unknown {r.summary.unknown}
+                <div className="flex items-center gap-2">
+                  <select
+                    value={r.mode}
+                    onChange={(e) =>
+                      void api.updateRule(r.id, { mode: e.target.value as ComplianceRule["mode"] }).then(load)
+                    }
+                    className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                  >
+                    <option value="report_only">Report only</option>
+                    <option value="automatic">Automatic</option>
+                    <option value="reviewer_approval">Reviewer approval</option>
+                  </select>
+                  <Button size="sm" variant="outline" onClick={() => loadIntoBuilder(r, false)} title="Edit rule">
+                    <Pencil className="mr-1 h-3.5 w-3.5" />
+                    Edit
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => loadIntoBuilder(r, true)} title="Copy rule">
+                    <Copy className="mr-1 h-3.5 w-3.5" />
+                    Copy
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => void api.deleteRule(r.id).then(load)} title="Delete rule">
+                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                  </Button>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <select
-                  value={r.mode}
-                  onChange={(e) =>
-                    void api.updateRule(r.id, { mode: e.target.value as ComplianceRule["mode"] }).then(load)
-                  }
-                  className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-                >
-                  <option value="report_only">Report only</option>
-                  <option value="automatic">Automatic</option>
-                  <option value="reviewer_approval">Reviewer approval</option>
-                </select>
-                <Button size="sm" variant="outline" onClick={() => loadIntoBuilder(r, false)} title="Edit rule">
-                  <Pencil className="mr-1 h-3.5 w-3.5" />
-                  Edit
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => loadIntoBuilder(r, true)} title="Copy rule">
-                  <Copy className="mr-1 h-3.5 w-3.5" />
-                  Copy
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => void api.deleteRule(r.id).then(load)} title="Delete rule">
-                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                </Button>
-              </div>
+              {r.evaluations && r.evaluations.length > 0 && (
+                <div className="space-y-1 border-t border-border/50 pt-2 text-xs">
+                  {r.evaluations.map((ev) => (
+                    <div key={ev.username} className="flex flex-wrap items-start gap-2">
+                      <Badge
+                        variant={
+                          ev.status === "pass" ? "default" : ev.status === "fail" ? "destructive" : "outline"
+                        }
+                      >
+                        {ev.status.toUpperCase()}
+                      </Badge>
+                      <span className="font-medium">{ev.username}:</span>
+                      <span className="text-muted-foreground">
+                        {ev.reasons.length ? ev.reasons.join(" · ") : "No details"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </CardContent>
@@ -872,12 +893,40 @@ export function RulesView({
           <CardHeader>
             <CardTitle className="text-base">Audit Log</CardTitle>
           </CardHeader>
-          <CardContent className="max-h-64 space-y-1.5 overflow-y-auto text-xs">
+          <CardContent className="max-h-72 space-y-2 overflow-y-auto text-xs">
             {logs.map((l) => (
-              <div key={l.id} className="border-b border-border pb-1">
-                <span className="font-semibold">{l.action.toUpperCase()}</span> {l.group_name} for{" "}
-                <span className="font-medium">{l.username}</span> (by {l.actor})
-                {l.reason && <div className="text-muted-foreground">{l.reason}</div>}
+              <div key={l.id} className="rounded-md border border-border/60 p-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <Badge
+                      variant={
+                        l.action === "granted" || l.action === "approved"
+                          ? "default"
+                          : l.action === "revoked" || l.action === "rejected"
+                            ? "destructive"
+                            : "secondary"
+                      }
+                    >
+                      {l.action.toUpperCase()}
+                    </Badge>
+                    <span className="font-medium">{l.username}</span>
+                    <span className="text-muted-foreground">→ {l.group_name}</span>
+                    {l.rule_name && <span className="text-muted-foreground">({l.rule_name})</span>}
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">
+                    {new Date(l.created_at).toLocaleString()} · by {l.actor}
+                  </span>
+                </div>
+                {l.reason && (
+                  <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-muted-foreground">
+                    {l.reason
+                      .split(/\s*\|\s*|\s*;\s*/)
+                      .filter(Boolean)
+                      .map((part, i) => (
+                        <li key={i}>{part}</li>
+                      ))}
+                  </ul>
+                )}
               </div>
             ))}
             {!logs.length && <p className="text-sm text-muted-foreground">No audit entries yet.</p>}

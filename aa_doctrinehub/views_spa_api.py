@@ -613,6 +613,16 @@ def _serialize_rule(rule: ComplianceRule) -> dict[str, Any]:
             "fail": sum(1 for e in evals if e.status == RuleEvaluation.Status.FAIL),
             "unknown": sum(1 for e in evals if e.status == RuleEvaluation.Status.UNKNOWN),
         },
+        "evaluations": [
+            {
+                "username": e.user.username,
+                "status": e.status,
+                "reasons": e.details.get("reasons", []) if isinstance(e.details, dict) else [],
+                "grace_until": e.grace_until.isoformat() if e.grace_until else None,
+                "evaluated_at": e.evaluated_at.isoformat() if e.evaluated_at else None,
+            }
+            for e in sorted(evals, key=lambda x: (x.status != RuleEvaluation.Status.FAIL, x.user.username))
+        ],
     }
 
 
@@ -624,7 +634,7 @@ def rules_collection(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
         if request.GET.get("seed_capitals") == "1" or not ComplianceRule.objects.exists():
             ensure_default_capitals_rule()
-        rules = ComplianceRule.objects.select_related("group").prefetch_related("evaluations").all()
+        rules = ComplianceRule.objects.select_related("group").prefetch_related("evaluations__user").all()
         groups = [{"id": g.pk, "name": g.name} for g in Group.objects.order_by("name")]
         return JsonResponse({"rules": [_serialize_rule(r) for r in rules], "groups": groups})
 
