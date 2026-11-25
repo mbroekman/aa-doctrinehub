@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCw, Send, ShieldCheck } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +29,7 @@ export function IntegrationsView({
   const [hangarDoctrineId, setHangarDoctrineId] = useState<number>(0);
   const [hangarCharacter, setHangarCharacter] = useState<string>("all");
   const [hangarMatchFilter, setHangarMatchFilter] = useState<"all" | "full" | "incomplete">("all");
+  const [expandedChars, setExpandedChars] = useState<Record<string, boolean>>({});
   const [sortKey, setSortKey] = useState<HangarSortKey>("ship");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selectedDoctrineId, setSelectedDoctrineId] = useState<number>(doctrines[0]?.id ?? 0);
@@ -177,61 +178,81 @@ export function IntegrationsView({
               <span>Loading hangar ships and resolving station/structure names, please wait...</span>
             </div>
           ) : groupedByCharacter.length ? (
-            groupedByCharacter.map(([charName, charShips]) => (
-              <div key={charName} className="rounded-md border border-border p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-sm font-semibold">{charName}</span>
-                  <Badge variant="secondary">{charShips.length} ship(s)</Badge>
+            groupedByCharacter.map(([charName, charShips]) => {
+              const isOpen = Boolean(expandedChars[charName]);
+              const fullCount = charShips.filter((s) => s.match_pct === 100).length;
+              return (
+                <div key={charName} className="rounded-md border border-border p-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedChars((prev) => ({ ...prev, [charName]: !prev[charName] }))
+                    }
+                    className="flex w-full items-center justify-between text-left hover:text-foreground"
+                  >
+                    <span className="flex items-center gap-2 text-sm font-semibold">
+                      {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      {charName}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {fullCount > 0 && (
+                        <Badge className="bg-emerald-600 text-white">{fullCount} full</Badge>
+                      )}
+                      <Badge variant="secondary">{charShips.length} ship(s)</Badge>
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="mt-3 overflow-x-auto border-t border-border/50 pt-2">
+                      <table className="w-full text-left text-sm">
+                        <thead>
+                          <tr className="border-b border-border text-xs uppercase text-muted-foreground">
+                            <th className="py-1.5 pr-3">
+                              <button type="button" onClick={() => toggleSort("ship")} className="font-semibold hover:text-foreground">
+                                Ship {renderSortIcon("ship")}
+                              </button>
+                            </th>
+                            <th className="py-1.5 pr-3">
+                              <button type="button" onClick={() => toggleSort("doctrine")} className="font-semibold hover:text-foreground">
+                                Doctrine {renderSortIcon("doctrine")}
+                              </button>
+                            </th>
+                            <th className="py-1.5 pr-3">
+                              <button type="button" onClick={() => toggleSort("location")} className="font-semibold hover:text-foreground">
+                                Location {renderSortIcon("location")}
+                              </button>
+                            </th>
+                            <th className="py-1.5 text-right">
+                              <button type="button" onClick={() => toggleSort("match")} className="font-semibold hover:text-foreground">
+                                100% / Fit {renderSortIcon("match")}
+                              </button>
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {charShips.map((s) => (
+                            <tr key={`${s.character_id}-${s.item_id}-${s.fitting_id}`} className="border-b border-border/50 last:border-b-0">
+                              <td className="py-1.5 pr-3">
+                                <span className="font-medium">{s.ship_type_name}</span>{" "}
+                                <span className="text-muted-foreground">({s.fitting_name})</span>
+                              </td>
+                              <td className="py-1.5 pr-3 text-xs text-muted-foreground">
+                                {s.doctrine_names.length ? s.doctrine_names.join(", ") : "—"}
+                              </td>
+                              <td className="py-1.5 pr-3 text-xs text-muted-foreground">{s.location_name}</td>
+                              <td className="py-1.5 text-right">
+                                <Badge className={matchBadgeClass(s.match_pct)}>
+                                  {s.match_pct === 100 ? "100% Full" : `${s.match_pct}% (${s.match_status})`}
+                                </Badge>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-border text-xs uppercase text-muted-foreground">
-                        <th className="py-1.5 pr-3">
-                          <button type="button" onClick={() => toggleSort("ship")} className="font-semibold hover:text-foreground">
-                            Ship {renderSortIcon("ship")}
-                          </button>
-                        </th>
-                        <th className="py-1.5 pr-3">
-                          <button type="button" onClick={() => toggleSort("doctrine")} className="font-semibold hover:text-foreground">
-                            Doctrine {renderSortIcon("doctrine")}
-                          </button>
-                        </th>
-                        <th className="py-1.5 pr-3">
-                          <button type="button" onClick={() => toggleSort("location")} className="font-semibold hover:text-foreground">
-                            Location {renderSortIcon("location")}
-                          </button>
-                        </th>
-                        <th className="py-1.5 text-right">
-                          <button type="button" onClick={() => toggleSort("match")} className="font-semibold hover:text-foreground">
-                            100% / Fit {renderSortIcon("match")}
-                          </button>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {charShips.map((s) => (
-                        <tr key={`${s.character_id}-${s.item_id}-${s.fitting_id}`} className="border-b border-border/50 last:border-b-0">
-                          <td className="py-1.5 pr-3">
-                            <span className="font-medium">{s.ship_type_name}</span>{" "}
-                            <span className="text-muted-foreground">({s.fitting_name})</span>
-                          </td>
-                          <td className="py-1.5 pr-3 text-xs text-muted-foreground">
-                            {s.doctrine_names.length ? s.doctrine_names.join(", ") : "—"}
-                          </td>
-                          <td className="py-1.5 pr-3 text-xs text-muted-foreground">{s.location_name}</td>
-                          <td className="py-1.5 text-right">
-                            <Badge className={matchBadgeClass(s.match_pct)}>
-                              {s.match_pct === 100 ? "100% Full" : `${s.match_pct}% (${s.match_status})`}
-                            </Badge>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ))
+              );
+            })
           ) : (
             <p className="text-sm text-muted-foreground">
               No matching doctrine ships found in synced character assets.
