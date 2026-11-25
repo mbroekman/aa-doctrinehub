@@ -243,31 +243,17 @@ export function App() {
         )}
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
-      {eligStatus && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">ESI Characters:</span>
-            {eligStatus.characters.map((c) => (
-              <Badge key={c.character_id} variant={c.has_valid_token ? "secondary" : "destructive"}>
-                {c.character_name} {c.has_valid_token ? `(${c.sync_status})` : "(missing scopes)"}
-              </Badge>
-            ))}
-            {!eligStatus.characters.length && <span className="text-muted-foreground">No characters linked yet.</span>}
-          </div>
-          <div className="flex items-center gap-2">
-            {!eligStatus.all_linked && (
-              <Button size="sm" variant="default" asChild>
-                <a href={config.linkCharacterUrl}>
-                  <Link2 className="mr-1 h-3.5 w-3.5" />
-                  Link Character
-                </a>
-              </Button>
-            )}
-            <Button size="sm" variant="outline" onClick={handleSyncEsi} disabled={syncingEsi}>
-              <RefreshCw className={`mr-1 h-3.5 w-3.5 ${syncingEsi ? "animate-spin" : ""}`} />
-              Sync Skills
-            </Button>
-          </div>
+      {eligStatus && !eligStatus.all_linked && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
+          <span>
+            Some characters are missing required ESI scopes for skill &amp; hangar checks.
+          </span>
+          <Button size="sm" variant="default" asChild>
+            <a href={config.linkCharacterUrl}>
+              <Link2 className="mr-1 h-3.5 w-3.5" />
+              Link Character
+            </a>
+          </Button>
         </div>
       )}
       <Tabs defaultValue="doctrines">
@@ -277,6 +263,9 @@ export function App() {
           </TabsTrigger>
           <TabsTrigger value="fittings">
             Fittings ({hasActiveFilter ? `${shownFittings.length}/${fittings.length}` : fittings.length})
+          </TabsTrigger>
+          <TabsTrigger value="characters">
+            ESI Characters ({eligStatus?.characters.length ?? 0})
           </TabsTrigger>
           {config.canViewCompliance && <TabsTrigger value="compliance">Compliance</TabsTrigger>}
           {config.canManageRules && <TabsTrigger value="rules">Rules &amp; Groups</TabsTrigger>}
@@ -295,6 +284,72 @@ export function App() {
           ) : (
             <p className="text-sm text-muted-foreground">No fittings to show.</p>
           )}
+        </TabsContent>
+        <TabsContent value="characters">
+          <Card>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+              <CardTitle className="text-base">ESI Characters &amp; Skill Snapshots</CardTitle>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="default" asChild>
+                  <a href={config.linkCharacterUrl}>
+                    <Link2 className="mr-1 h-3.5 w-3.5" />
+                    Link Character
+                  </a>
+                </Button>
+                <Button size="sm" variant="outline" onClick={handleSyncEsi} disabled={syncingEsi}>
+                  <RefreshCw className={`mr-1 h-3.5 w-3.5 ${syncingEsi ? "animate-spin" : ""}`} />
+                  Sync All Now
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {eligStatus?.characters.length ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-xs uppercase text-muted-foreground">
+                        <th className="py-2 pr-3">Character</th>
+                        <th className="py-2 pr-3">Scopes</th>
+                        <th className="py-2 pr-3">Snapshot Status</th>
+                        <th className="py-2 pr-3 text-right">Total SP</th>
+                        <th className="py-2 text-right">Last Synced</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {eligStatus.characters.map((c) => (
+                        <tr key={c.character_id} className="border-b border-border/50 last:border-b-0">
+                          <td className="py-2 pr-3 font-medium">{c.character_name}</td>
+                          <td className="py-2 pr-3">
+                            <Badge variant={c.has_valid_token ? "default" : "destructive"}>
+                              {c.has_valid_token ? "Valid" : "Missing scopes"}
+                            </Badge>
+                          </td>
+                          <td className="py-2 pr-3">
+                            <Badge variant={c.sync_status === "ok" ? "secondary" : c.sync_status === "error" ? "destructive" : "outline"}>
+                              {c.sync_status}
+                            </Badge>
+                            {c.last_error && (
+                              <span className="ml-2 text-xs text-destructive">{c.last_error}</span>
+                            )}
+                          </td>
+                          <td className="py-2 pr-3 text-right font-mono text-xs">
+                            {c.total_sp ? c.total_sp.toLocaleString() : "—"}
+                          </td>
+                          <td className="py-2 text-right text-xs text-muted-foreground">
+                            {c.last_synced_at ? new Date(c.last_synced_at).toLocaleString() : "Never"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No characters linked yet. Click <strong>Link Character</strong> to authorize ESI scopes.
+                </p>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
         {config.canViewCompliance && (
           <TabsContent value="compliance">
