@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link2, Plus, RefreshCw, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Link2, Plus, RefreshCw, Search, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -98,7 +98,44 @@ export function App() {
   const [importOpen, setImportOpen] = useState(false);
   const [eligStatus, setEligStatus] = useState<EligibilityStatusResponse | null>(null);
   const [syncingEsi, setSyncingEsi] = useState(false);
+  const [charSortKey, setCharSortKey] = useState<"name" | "scopes" | "status" | "sp" | "synced">("name");
+  const [charSortDir, setCharSortDir] = useState<"asc" | "desc">("asc");
   const [error, setError] = useState("");
+
+  const toggleCharSort = (key: "name" | "scopes" | "status" | "sp" | "synced") => {
+    if (charSortKey === key) {
+      setCharSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setCharSortKey(key);
+      setCharSortDir(key === "sp" || key === "synced" ? "desc" : "asc");
+    }
+  };
+
+  const renderCharSortIcon = (key: "name" | "scopes" | "status" | "sp" | "synced") => {
+    if (charSortKey !== key) return <ArrowUpDown className="ml-1 inline h-3 w-3 opacity-50" />;
+    return charSortDir === "asc" ? (
+      <ArrowUp className="ml-1 inline h-3 w-3" />
+    ) : (
+      <ArrowDown className="ml-1 inline h-3 w-3" />
+    );
+  };
+
+  const sortedCharacters = useMemo(() => {
+    const list = [...(eligStatus?.characters ?? [])];
+    const factor = charSortDir === "asc" ? 1 : -1;
+    list.sort((a, b) => {
+      if (charSortKey === "sp") return (a.total_sp - b.total_sp) * factor;
+      if (charSortKey === "scopes") return (Number(a.has_valid_token) - Number(b.has_valid_token)) * factor;
+      if (charSortKey === "status") return a.sync_status.localeCompare(b.sync_status) * factor;
+      if (charSortKey === "synced") {
+        const ta = a.last_synced_at ? Date.parse(a.last_synced_at) : 0;
+        const tb = b.last_synced_at ? Date.parse(b.last_synced_at) : 0;
+        return (ta - tb) * factor;
+      }
+      return a.character_name.localeCompare(b.character_name) * factor;
+    });
+    return list;
+  }, [eligStatus, charSortKey, charSortDir]);
 
   const load = useCallback(() => {
     Promise.all([api.doctrines(), api.fittings()])
@@ -308,15 +345,35 @@ export function App() {
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="border-b border-border text-xs uppercase text-muted-foreground">
-                        <th className="py-2 pr-3">Character</th>
-                        <th className="py-2 pr-3">Scopes</th>
-                        <th className="py-2 pr-3">Snapshot Status</th>
-                        <th className="py-2 pr-3 text-right">Total SP</th>
-                        <th className="py-2 text-right">Last Synced</th>
+                        <th className="py-2 pr-3">
+                          <button type="button" onClick={() => toggleCharSort("name")} className="font-semibold hover:text-foreground">
+                            Character {renderCharSortIcon("name")}
+                          </button>
+                        </th>
+                        <th className="py-2 pr-3">
+                          <button type="button" onClick={() => toggleCharSort("scopes")} className="font-semibold hover:text-foreground">
+                            Scopes {renderCharSortIcon("scopes")}
+                          </button>
+                        </th>
+                        <th className="py-2 pr-3">
+                          <button type="button" onClick={() => toggleCharSort("status")} className="font-semibold hover:text-foreground">
+                            Snapshot Status {renderCharSortIcon("status")}
+                          </button>
+                        </th>
+                        <th className="py-2 pr-3 text-right">
+                          <button type="button" onClick={() => toggleCharSort("sp")} className="font-semibold hover:text-foreground">
+                            Total SP {renderCharSortIcon("sp")}
+                          </button>
+                        </th>
+                        <th className="py-2 text-right">
+                          <button type="button" onClick={() => toggleCharSort("synced")} className="font-semibold hover:text-foreground">
+                            Last Synced {renderCharSortIcon("synced")}
+                          </button>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {eligStatus.characters.map((c) => (
+                      {sortedCharacters.map((c) => (
                         <tr key={c.character_id} className="border-b border-border/50 last:border-b-0">
                           <td className="py-2 pr-3 font-medium">{c.character_name}</td>
                           <td className="py-2 pr-3">
