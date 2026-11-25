@@ -8,6 +8,10 @@ All notable changes to this project will be documented in this file.
 
 - **Python 3.10 support dropped.** Minimum supported version is now Python 3.11.
 
+### Fixed
+
+- **External Auth scraper (TASK-10):** Ignored generic `"Doctrine Information"` card headings so the real doctrine name from the index is preserved, restricted doctrine icon extraction to `images.evetech.net/types/` (never character portraits), and resolved `ship_type_id` via `EveType` (matching `ship_type_name`) or `/render` ship images instead of picking module icons from the fitting page.
+
 ### Added
 
 - **External Auth scraper (TASK-6, TASK-7, TASK-8, TASK-9):** Added `Source.REMOTE_AUTH` (`External Auth`, read-only), `remote_scrape.py`, `POST /api/v1/settings/remote-scrape/`, and the **Import from External Auth** preview/import card in Settings to scrape doctrines, fittings, and categories from another Alliance Auth instance using a one-time `sessionid` cookie, including batch `limit`, `skip_existing`, fast index-only preview with full totals, a structured **Import summary** card, and loading feedback.

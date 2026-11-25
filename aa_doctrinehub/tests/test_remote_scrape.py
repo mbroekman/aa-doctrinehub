@@ -25,7 +25,11 @@ INDEX_HTML = """
 
 DOCTRINE_HTML = """
 <html><body>
-  <h1>Shield HAC</h1>
+  <img src="https://images.evetech.net/characters/2116042730/portrait?size=64" />
+  <div class="card">
+    <div class="card-header"><h5 class="card-title">Doctrine Information</h5></div>
+    <div class="card-body"><p>Info</p></div>
+  </div>
   <div class="card">
     <div class="card-header"><h5 class="card-title">Description</h5></div>
     <div class="card-body"><p>Mainline HAC fleet</p></div>
@@ -44,7 +48,8 @@ FITS_LIST_HTML = """
 
 FIT_101_HTML = """
 <html><body>
-  <img src="https://images.evetech.net/types/12015/icon?size=64" />
+  <img src="https://images.evetech.net/types/519/icon?size=32" alt="Gyrostabilizer II" />
+  <img src="https://images.evetech.net/types/12015/render?size=256" alt="Muninn" />
   <textarea id="eft-fitting">[Muninn, Muninn DPS]
 
 Gyrostabilizer II
@@ -59,7 +64,7 @@ Gyrostabilizer II
 
 FIT_102_HTML = """
 <html><body>
-  <img src="https://images.evetech.net/types/22456/icon?size=64" />
+  <img src="https://images.evetech.net/types/22456/render?size=256" alt="Sabre" />
   <textarea id="eft-fitting">[Sabre, Sabre Tackle]
 
 Gyrostabilizer II
@@ -113,8 +118,10 @@ def test_scrape_remote_site_collects_doctrines_fittings_and_categories():
 
     assert len(snap.doctrines) == 1
     assert snap.doctrines[0].name == "Shield HAC"
+    assert snap.doctrines[0].icon_url == "https://images.evetech.net/types/12015/icon?size=64"
     assert snap.doctrines[0].fitting_ids == [101]
     assert len(snap.fittings) == 2
+    assert snap.fittings[0].ship_type_id == 12015
     assert len(snap.categories) == 1
     assert snap.categories[0].color == "#ff0000"
 

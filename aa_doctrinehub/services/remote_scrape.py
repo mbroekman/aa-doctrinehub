@@ -35,6 +35,14 @@ DOCTRINE_DETAIL_RE = re.compile(r"/fittings/doctrine/(\d+)/?$")
 CAT_DETAIL_RE = re.compile(r"/fittings/cat/(\d+)/?$")
 RGB_RE = re.compile(r"rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)")
 EVETECH_TYPE_ICON_RE = re.compile(r"images\.evetech\.net/types/(\d+)/")
+_GENERIC_HEADINGS = {
+    "fittings",
+    "doctrine",
+    "doctrine information",
+    "doctrine details",
+    "navigation",
+    "menu",
+}
 
 
 class RemoteScrapeError(RuntimeError):
@@ -99,11 +107,26 @@ def _rgb_to_hex(style: str) -> str | None:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-def _extract_ship_type_id(soup: BeautifulSoup) -> int | None:
+def _extract_ship_type_id(soup: BeautifulSoup, ship_type_name: str = "") -> int | None:
+    if ship_type_name:
+        try:
+            from eveuniverse.models import EveType
+
+            eve_id = (
+                EveType.objects.filter(name=ship_type_name)
+                .values_list("id", flat=True)
+                .first()
+            )
+            if eve_id:
+                return int(eve_id)
+        except Exception:  # noqa: BLE001 - eveuniverse is optional in minimal test envs
+            pass
+
     for img in soup.select("img[src]"):
         src = str(img.get("src") or "")
+        alt = str(img.get("alt") or "").strip()
         match = EVETECH_TYPE_ICON_RE.search(src)
-        if match:
+        if match and ("/render" in src or (ship_type_name and alt.lower() == ship_type_name.lower())):
             return int(match.group(1))
     return None
 
@@ -130,14 +153,16 @@ def _scrape_doctrine(
 ) -> SourceDoctrine:
     soup = _get_html(session, urljoin(base_url, f"/fittings/doctrine/{doctrine_id}/"), timeout=timeout)
 
-    name = fallback_name
-    for selector in ("h1", ".card-title"):
-        heading = soup.select_one(selector)
-        if heading:
+    name = fallback_name.strip()
+    for selector in ("h1", "h2", ".card-title"):
+        for heading in soup.select(selector):
             text = heading.get_text(strip=True)
-            if text and text.lower() not in {"fittings", "doctrine"}:
-                name = text
+            if text and text.lower() not in _GENERIC_HEADINGS:
+                if not name or name.startswith("Doctrine "):
+                    name = text
                 break
+        if name and not name.startswith("Doctrine "):
+            break
 
     description = ""
     for card_title in soup.select(".card-title"):
@@ -150,7 +175,7 @@ def _scrape_doctrine(
             break
 
     icon_url = ""
-    for img in soup.select('img[src*="images.evetech.net"]'):
+    for img in soup.select('img[src*="images.evetech.net/types/"]'):
         src = str(img.get("src") or "").strip()
         if src:
             icon_url = src
@@ -199,7 +224,7 @@ def _scrape_fitting(
         external_id=fit_id,
         name=name,
         description=_extract_fit_notes(soup),
-        ship_type_id=_extract_ship_type_id(soup) or 0,
+        ship_type_id=_extract_ship_type_id(soup, ship_type_name) or 0,
         ship_type_name=ship_type_name,
         eft=eft_text,
         items=items,
