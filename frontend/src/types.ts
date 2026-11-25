@@ -100,4 +100,12 @@ export interface RemoteScrapeImportResult {
   doctrines_updated: number;
   doctrines_archived: number;
   categories_synced: number;
+  total_doctrines_stored: number;
+  total_fittings_stored: number;
+  total_categories_stored: number;
+  doctrines: {
+    external_id: number;
+    name: string;
+    fittings_count: number;
+  }[];
 }

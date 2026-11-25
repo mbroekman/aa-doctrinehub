@@ -205,7 +205,12 @@ def test_remote_scrape_api_endpoint_requires_permission_and_imports(client):
             content_type="application/json",
         )
         assert resp_imp.status_code == 200
-        assert resp_imp.json()["doctrines_created"] == 1
+        imp_data = resp_imp.json()
+        assert imp_data["doctrines_created"] == 1
+        assert imp_data["total_doctrines_stored"] == 1
+        assert imp_data["total_fittings_stored"] == 2
+        assert imp_data["total_categories_stored"] == 1
+        assert len(imp_data["doctrines"]) == 1
 
 
 def test_batched_scrape_skips_existing_and_preserves_earlier_batches():

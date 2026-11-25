@@ -258,6 +258,8 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
 
     prune_missing = limit is None and not skip_existing
     result = import_remote_scrape(snapshot, prune_missing=prune_missing)
+    from .models import Doctrine as DoctrineModel, Source as SourceChoices
+
     return JsonResponse(
         {
             "mode": "import",
@@ -269,5 +271,16 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
             "doctrines_updated": result.doctrines_updated,
             "doctrines_archived": result.doctrines_archived,
             "categories_synced": result.categories_synced,
+            "total_doctrines_stored": DoctrineModel.objects.from_source(SourceChoices.REMOTE_AUTH).count(),
+            "total_fittings_stored": Fitting.objects.from_source(SourceChoices.REMOTE_AUTH).count(),
+            "total_categories_stored": Category.objects.from_source(SourceChoices.REMOTE_AUTH).count(),
+            "doctrines": [
+                {
+                    "external_id": d.external_id,
+                    "name": d.name,
+                    "fittings_count": len(d.fitting_ids),
+                }
+                for d in snapshot.doctrines
+            ],
         }
     )

@@ -68,6 +68,7 @@ export function SyncSettingsView() {
         setScrapePreview(await api.remoteScrapePreview(payload));
       } else {
         setScrapeResult(await api.remoteScrapeImport(payload));
+        setScrapePreview(null);
       }
     } catch (e) {
       setScrapeError((e as Error).message);
@@ -273,7 +274,47 @@ export function SyncSettingsView() {
             </div>
           )}
           {scrapeResult && (
-            <p className="text-muted-foreground">Import complete: {scrapeResult.summary}</p>
+            <div className="rounded-md border p-3 space-y-2">
+              <div className="font-medium">Import summary</div>
+              <div className="grid gap-2 sm:grid-cols-3 text-xs">
+                <div className="rounded border p-2">
+                  <div className="font-medium">Doctrines</div>
+                  <div>
+                    +{scrapeResult.doctrines_created} new, {scrapeResult.doctrines_updated} updated
+                    {scrapeResult.doctrines_archived > 0 ? `, ${scrapeResult.doctrines_archived} archived` : ""}
+                  </div>
+                  <div className="text-muted-foreground">
+                    Total stored: {scrapeResult.total_doctrines_stored}
+                  </div>
+                </div>
+                <div className="rounded border p-2">
+                  <div className="font-medium">Fittings</div>
+                  <div>
+                    +{scrapeResult.fittings_created} new, {scrapeResult.fittings_updated} updated
+                    {scrapeResult.fittings_removed > 0 ? `, ${scrapeResult.fittings_removed} removed` : ""}
+                  </div>
+                  <div className="text-muted-foreground">
+                    Total stored: {scrapeResult.total_fittings_stored}
+                  </div>
+                </div>
+                <div className="rounded border p-2">
+                  <div className="font-medium">Categories</div>
+                  <div>{scrapeResult.categories_synced} synced</div>
+                  <div className="text-muted-foreground">
+                    Total stored: {scrapeResult.total_categories_stored}
+                  </div>
+                </div>
+              </div>
+              {scrapeResult.doctrines.length > 0 && (
+                <ul className="list-disc pl-5 text-xs text-muted-foreground space-y-0.5 max-h-40 overflow-y-auto">
+                  {scrapeResult.doctrines.map((d) => (
+                    <li key={d.external_id}>
+                      {d.name} ({d.fittings_count} fits)
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
           {scrapeError && <p className="text-destructive">{scrapeError}</p>}
         </CardContent>
