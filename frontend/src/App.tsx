@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, Search, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -89,6 +89,8 @@ export function App() {
   const [doctrines, setDoctrines] = useState<Doctrine[]>([]);
   const [fittings, setFittings] = useState<FittingSummary[]>([]);
   const [query, setQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all");
   const [openFitting, setOpenFitting] = useState<number | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [error, setError] = useState("");
@@ -104,19 +106,120 @@ export function App() {
 
   useEffect(load, [load]);
 
+  const categoryOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const d of doctrines) {
+      for (const c of d.categories) names.add(c.name);
+    }
+    for (const f of fittings) {
+      for (const c of f.categories) names.add(c.name);
+    }
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [doctrines, fittings]);
+
+  const sourceOptions = useMemo(() => {
+    const sources = new Set<string>();
+    for (const d of doctrines) sources.add(d.source);
+    for (const f of fittings) sources.add(f.source);
+    return Array.from(sources);
+  }, [doctrines, fittings]);
+
   const needle = query.trim().toLowerCase();
-  const shownDoctrines = doctrines.filter(
-    (d) =>
-      !needle ||
+  const shownDoctrines = doctrines.filter((d) => {
+    if (sourceFilter !== "all" && d.source !== sourceFilter) return false;
+    if (
+      categoryFilter !== "all" &&
+      !d.categories.some((c) => c.name === categoryFilter) &&
+      !d.fittings.some((f) => f.categories.some((c) => c.name === categoryFilter))
+    ) {
+      return false;
+    }
+    if (!needle) return true;
+    return (
       d.name.toLowerCase().includes(needle) ||
-      d.fittings.some((f) => `${f.ship_type_name} ${f.name}`.toLowerCase().includes(needle)),
-  );
-  const shownFittings = fittings.filter((f) => !needle || `${f.ship_type_name} ${f.name}`.toLowerCase().includes(needle));
+      d.description.toLowerCase().includes(needle) ||
+      d.categories.some((c) => c.name.toLowerCase().includes(needle)) ||
+      d.fittings.some((f) =>
+        `${f.ship_type_name} ${f.name} ${f.role} ${f.categories.map((c) => c.name).join(" ")}`
+          .toLowerCase()
+          .includes(needle),
+      )
+    );
+  });
+  const shownFittings = fittings.filter((f) => {
+    if (sourceFilter !== "all" && f.source !== sourceFilter) return false;
+    if (categoryFilter !== "all" && !f.categories.some((c) => c.name === categoryFilter)) return false;
+    if (!needle) return true;
+    return `${f.ship_type_name} ${f.name} ${f.categories.map((c) => c.name).join(" ")}`
+      .toLowerCase()
+      .includes(needle);
+  });
+
+  const hasActiveFilter = Boolean(needle) || categoryFilter !== "all" || sourceFilter !== "all";
 
   return (
     <div className="space-y-4 p-1">
       <div className="flex flex-wrap items-center gap-2">
-        <Input placeholder="Search doctrines and ships" value={query} onChange={(e) => setQuery(e.target.value)} className="max-w-xs" />
+        <div className="relative w-full max-w-sm">
+          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search doctrines, ships, fits, categories..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="pl-8 pr-8"
+          />
+          {query && (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setQuery("")}
+              className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        {categoryOptions.length > 0 && (
+          <select
+            aria-label="Filter by category"
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option value="all">All categories</option>
+            {categoryOptions.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        )}
+        {sourceOptions.length > 1 && (
+          <select
+            aria-label="Filter by source"
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option value="all">All sources</option>
+            {sourceOptions.includes("local") && <option value="local">Doctrine Hub</option>}
+            {sourceOptions.includes("fittings") && <option value="fittings">Fittings</option>}
+            {sourceOptions.includes("remote_auth") && <option value="remote_auth">External Auth</option>}
+          </select>
+        )}
+        {hasActiveFilter && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setQuery("");
+              setCategoryFilter("all");
+              setSourceFilter("all");
+            }}
+          >
+            Reset
+          </Button>
+        )}
         {config.canManage && (
           <Button size="sm" className="ml-auto" onClick={() => setImportOpen(true)}>
             <Plus className="mr-1 h-4 w-4" />
@@ -127,8 +230,12 @@ export function App() {
       {error && <p className="text-sm text-destructive">{error}</p>}
       <Tabs defaultValue="doctrines">
         <TabsList>
-          <TabsTrigger value="doctrines">Doctrines</TabsTrigger>
-          <TabsTrigger value="fittings">Fittings</TabsTrigger>
+          <TabsTrigger value="doctrines">
+            Doctrines ({hasActiveFilter ? `${shownDoctrines.length}/${doctrines.length}` : doctrines.length})
+          </TabsTrigger>
+          <TabsTrigger value="fittings">
+            Fittings ({hasActiveFilter ? `${shownFittings.length}/${fittings.length}` : fittings.length})
+          </TabsTrigger>
           {config.canManage && <TabsTrigger value="settings">Settings</TabsTrigger>}
         </TabsList>
         <TabsContent value="doctrines" className="grid gap-4 lg:grid-cols-2">
@@ -138,7 +245,11 @@ export function App() {
           {!shownDoctrines.length && <p className="text-sm text-muted-foreground">No doctrines to show.</p>}
         </TabsContent>
         <TabsContent value="fittings">
-          <FittingList fittings={shownFittings} onOpenFitting={setOpenFitting} />
+          {shownFittings.length > 0 ? (
+            <FittingList fittings={shownFittings} onOpenFitting={setOpenFitting} />
+          ) : (
+            <p className="text-sm text-muted-foreground">No fittings to show.</p>
+          )}
         </TabsContent>
         {config.canManage && (
           <TabsContent value="settings">
