@@ -10,11 +10,7 @@ pytestmark = pytest.mark.django_db
 
 def _unconditional_unique_names(model):
     """UniqueConstraint names on model with no condition set."""
-    return {
-        c.name
-        for c in model._meta.constraints
-        if hasattr(c, "fields") and c.condition is None
-    }
+    return {c.name for c in model._meta.constraints if hasattr(c, "fields") and c.condition is None}
 
 
 @pytest.mark.parametrize(
