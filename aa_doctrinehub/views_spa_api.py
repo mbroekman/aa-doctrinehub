@@ -222,6 +222,16 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
 
     include_standalone_fits = bool(body.get("include_standalone_fits", True))
     include_categories = bool(body.get("include_categories", True))
+    skip_existing = bool(body.get("skip_existing", False))
+    raw_limit = body.get("limit")
+    limit: int | None = None
+    if raw_limit not in (None, "", 0, "0"):
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            return JsonResponse({"error": "limit must be a positive whole number"}, status=400)
+        if limit < 1:
+            return JsonResponse({"error": "limit must be at least 1"}, status=400)
 
     try:
         snapshot = scrape_remote_fittings_site(
@@ -229,6 +239,8 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
             sessionid,
             include_standalone_fits=include_standalone_fits,
             include_categories=include_categories,
+            limit=limit,
+            skip_existing=skip_existing,
         )
     except RemoteScrapeError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
@@ -236,7 +248,8 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
     if mode == "preview":
         return JsonResponse(preview_remote_scrape(snapshot))
 
-    result = import_remote_scrape(snapshot)
+    prune_missing = limit is None and not skip_existing
+    result = import_remote_scrape(snapshot, prune_missing=prune_missing)
     return JsonResponse(
         {
             "mode": "import",

@@ -244,6 +244,8 @@ def scrape_remote_fittings_site(
     *,
     include_standalone_fits: bool = True,
     include_categories: bool = True,
+    limit: int | None = None,
+    skip_existing: bool = False,
     timeout: int = 15,
     request_delay: float = 0.05,
 ) -> SourceSnapshot:
@@ -255,12 +257,36 @@ def scrape_remote_fittings_site(
     fits_soup = _get_html(session, urljoin(normalized, "/fittings/fit/all/"), timeout=timeout)
     fit_links: dict[int, str] = _extract_links(fits_soup, FIT_DETAIL_RE) if include_standalone_fits else {}
 
-    # Collect doctrine links from the Fittings index (and /fittings/doctrine/all/ if available).
+    # Collect doctrine links from the Fittings index.
     index_soup = _get_html(session, urljoin(normalized, "/fittings/"), timeout=timeout)
     doctrine_links = _extract_links(index_soup, DOCTRINE_DETAIL_RE)
 
+    existing_doc_ids: set[int] = set()
+    existing_fit_ids: set[int] = set()
+    existing_cat_ids: set[int] = set()
+    if skip_existing:
+        existing_doc_ids = {
+            int(x)
+            for x in Doctrine.objects.from_source(Source.REMOTE_AUTH).values_list("external_id", flat=True)
+            if x is not None
+        }
+        existing_fit_ids = {
+            int(x)
+            for x in Fitting.objects.from_source(Source.REMOTE_AUTH).values_list("external_id", flat=True)
+            if x is not None
+        }
+        existing_cat_ids = {
+            int(x)
+            for x in Category.objects.from_source(Source.REMOTE_AUTH).values_list("external_id", flat=True)
+            if x is not None
+        }
+
+    doc_items = [(did, name) for did, name in doctrine_links.items() if did not in existing_doc_ids]
+    if limit is not None and limit > 0:
+        doc_items = doc_items[:limit]
+
     snapshot = SourceSnapshot()
-    for doctrine_id, d_name in doctrine_links.items():
+    for doctrine_id, d_name in doc_items:
         if request_delay > 0:
             time.sleep(request_delay)
         doctrine = _scrape_doctrine(session, normalized, doctrine_id, d_name, timeout=timeout)
@@ -268,7 +294,11 @@ def scrape_remote_fittings_site(
         for fid in doctrine.fitting_ids:
             fit_links.setdefault(fid, f"Fit {fid}")
 
-    for fit_id, f_name in fit_links.items():
+    fit_items = [(fid, name) for fid, name in fit_links.items() if fid not in existing_fit_ids]
+    if limit is not None and limit > 0:
+        fit_items = fit_items[:limit]
+
+    for fit_id, f_name in fit_items:
         if request_delay > 0:
             time.sleep(request_delay)
         fitting = _scrape_fitting(session, normalized, fit_id, f_name, timeout=timeout)
@@ -278,7 +308,10 @@ def scrape_remote_fittings_site(
     if include_categories:
         cats_soup = _get_html(session, urljoin(normalized, "/fittings/cat/all/"), timeout=timeout)
         cat_links = _extract_links(cats_soup, CAT_DETAIL_RE)
-        for cat_id, c_name in cat_links.items():
+        cat_items = [(cid, name) for cid, name in cat_links.items() if cid not in existing_cat_ids]
+        if limit is not None and limit > 0:
+            cat_items = cat_items[:limit]
+        for cat_id, c_name in cat_items:
             if request_delay > 0:
                 time.sleep(request_delay)
             snapshot.categories.append(
@@ -327,10 +360,11 @@ def preview_remote_scrape(snapshot: SourceSnapshot) -> dict[str, Any]:
     }
 
 
-def import_remote_scrape(snapshot: SourceSnapshot) -> SyncResult:
+def import_remote_scrape(snapshot: SourceSnapshot, *, prune_missing: bool = True) -> SyncResult:
     """Apply ``snapshot`` as read-only ``Source.REMOTE_AUTH`` records."""
     return apply_snapshot(
         snapshot,
         source=Source.REMOTE_AUTH,
         change_note="Synced from External Auth",
+        prune_missing=prune_missing,
     )

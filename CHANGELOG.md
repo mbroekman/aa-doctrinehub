@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- **External Auth scraper (TASK-6):** Added `Source.REMOTE_AUTH` (`External Auth`, read-only), `remote_scrape.py`, `POST /api/v1/settings/remote-scrape/`, and the **Import from External Auth** preview/import card in Settings to scrape doctrines, fittings, and categories from another Alliance Auth instance using a one-time `sessionid` cookie.
+- **External Auth scraper (TASK-6, TASK-7):** Added `Source.REMOTE_AUTH` (`External Auth`, read-only), `remote_scrape.py`, `POST /api/v1/settings/remote-scrape/`, and the **Import from External Auth** preview/import card in Settings to scrape doctrines, fittings, and categories from another Alliance Auth instance using a one-time `sessionid` cookie, including batch `limit` and `skip_existing` options that preserve earlier batches.
 - **Dutch translation:** `locale/nl` for model names, statuses and roles.
 
 - **Project scaffolding (TASK-1.1):** Django app `aa_doctrinehub` with permissions (`basic_access`,

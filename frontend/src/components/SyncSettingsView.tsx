@@ -14,6 +14,8 @@ export function SyncSettingsView() {
   const [remoteSessionId, setRemoteSessionId] = useState("");
   const [includeStandalone, setIncludeStandalone] = useState(true);
   const [includeCategories, setIncludeCategories] = useState(true);
+  const [batchLimit, setBatchLimit] = useState("25");
+  const [skipExisting, setSkipExisting] = useState(true);
   const [scrapeBusy, setScrapeBusy] = useState(false);
   const [scrapeError, setScrapeError] = useState("");
   const [scrapePreview, setScrapePreview] = useState<RemoteScrapePreview | null>(null);
@@ -53,11 +55,14 @@ export function SyncSettingsView() {
       setScrapeResult(null);
     }
     try {
+      const parsedLimit = batchLimit.trim() ? Number(batchLimit.trim()) : null;
       const payload = {
         base_url: remoteUrl,
         sessionid: remoteSessionId,
         include_standalone_fits: includeStandalone,
         include_categories: includeCategories,
+        limit: parsedLimit && parsedLimit > 0 ? parsedLimit : null,
+        skip_existing: skipExisting,
       };
       if (mode === "preview") {
         setScrapePreview(await api.remoteScrapePreview(payload));
@@ -157,7 +162,26 @@ export function SyncSettingsView() {
               />
             </label>
           </div>
-          <div className="flex flex-wrap gap-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Max items per batch (blank = all)</span>
+              <Input
+                type="number"
+                min={1}
+                placeholder="All"
+                className="w-24"
+                value={batchLimit}
+                onChange={(e) => setBatchLimit(e.target.value)}
+              />
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={skipExisting}
+                onChange={(e) => setSkipExisting(e.target.checked)}
+              />
+              Skip already imported
+            </label>
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"

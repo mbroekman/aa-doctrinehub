@@ -238,6 +238,7 @@ def _sync_doctrine(
     result: SyncResult,
     *,
     source: str = Source.FITTINGS,
+    prune_missing: bool = True,
 ) -> Doctrine:
     doctrine, created = Doctrine.objects.get_or_create(
         source=source,
@@ -252,8 +253,17 @@ def _sync_doctrine(
     doctrine.last_synced_at = now
     doctrine.save()
 
-    wanted = [fittings[pk] for pk in source_item.fitting_ids if pk in fittings]
-    doctrine.doctrine_fittings.exclude(fitting__in=wanted).delete()
+    wanted_map = dict(fittings)
+    if not prune_missing and source_item.fitting_ids:
+        missing_ids = [pk for pk in source_item.fitting_ids if pk not in wanted_map]
+        if missing_ids:
+            for existing_fit in Fitting.objects.filter(source=source, external_id__in=missing_ids):
+                if existing_fit.external_id is not None:
+                    wanted_map[existing_fit.external_id] = existing_fit
+
+    wanted = [wanted_map[pk] for pk in source_item.fitting_ids if pk in wanted_map]
+    if prune_missing:
+        doctrine.doctrine_fittings.exclude(fitting__in=wanted).delete()
     existing = {df.fitting_id: df for df in doctrine.doctrine_fittings.all()}
     for order, fitting in enumerate(wanted):
         link = existing.get(fitting.pk)
@@ -277,6 +287,7 @@ def _sync_categories(
     result: SyncResult,
     *,
     source: str = Source.FITTINGS,
+    prune_missing: bool = True,
 ) -> None:
     kept: list[int] = []
     for source_cat in sources:
@@ -287,11 +298,20 @@ def _sync_categories(
         )
         if source == Source.FITTINGS:
             category.visible_to_groups.set(Group.objects.filter(pk__in=source_cat.group_ids))
-        category.fittings.set([fittings[pk] for pk in source_cat.fitting_ids if pk in fittings])
-        category.doctrines.set([doctrines[pk] for pk in source_cat.doctrine_ids if pk in doctrines])
+        matched_fittings = [fittings[pk] for pk in source_cat.fitting_ids if pk in fittings]
+        matched_doctrines = [doctrines[pk] for pk in source_cat.doctrine_ids if pk in doctrines]
+        if prune_missing:
+            category.fittings.set(matched_fittings)
+            category.doctrines.set(matched_doctrines)
+        else:
+            if matched_fittings:
+                category.fittings.add(*matched_fittings)
+            if matched_doctrines:
+                category.doctrines.add(*matched_doctrines)
         kept.append(source_cat.external_id)
         result.categories_synced += 1
-    Category.objects.from_source(source).exclude(external_id__in=kept).delete()
+    if prune_missing:
+        Category.objects.from_source(source).exclude(external_id__in=kept).delete()
 
 
 @transaction.atomic
@@ -300,11 +320,13 @@ def apply_snapshot(
     *,
     source: str = Source.FITTINGS,
     change_note: str = "Synced from Fittings",
+    prune_missing: bool = True,
 ) -> SyncResult:
     """Make the sourced records in Doctrine Hub match ``snapshot``.
 
-    Doctrines that disappeared from the source are archived. Fittings that
-    disappeared are removed, unless one of our own doctrines still uses them.
+    When ``prune_missing`` is True (full sync), doctrines that disappeared from
+    the source are archived and unused fittings/categories are removed. For
+    partial batch imports, pass ``prune_missing=False`` to keep earlier batches.
     """
     now = timezone.now()
     result = SyncResult()
@@ -312,23 +334,37 @@ def apply_snapshot(
     fittings = {
         s.external_id: _sync_fitting(s, now, result, source=source, change_note=change_note) for s in snapshot.fittings
     }
-    doctrines = {s.external_id: _sync_doctrine(s, fittings, now, result, source=source) for s in snapshot.doctrines}
-    _sync_categories(snapshot.categories, fittings, doctrines, now, result, source=source)
-
-    gone_doctrines = (
-        Doctrine.objects.from_source(source)
-        .exclude(external_id__in=list(doctrines))
-        .exclude(status=Doctrine.Status.ARCHIVED)
+    doctrines = {
+        s.external_id: _sync_doctrine(
+            s, fittings, now, result, source=source, prune_missing=prune_missing
+        )
+        for s in snapshot.doctrines
+    }
+    _sync_categories(
+        snapshot.categories,
+        fittings,
+        doctrines,
+        now,
+        result,
+        source=source,
+        prune_missing=prune_missing,
     )
-    result.doctrines_archived = gone_doctrines.update(status=Doctrine.Status.ARCHIVED)
 
-    gone_fittings = (
-        Fitting.objects.from_source(source)
-        .exclude(external_id__in=list(fittings))
-        .exclude(doctrine_fittings__doctrine__source=Source.LOCAL)
-    )
-    _total, deleted = gone_fittings.delete()
-    result.fittings_removed = deleted.get(Fitting._meta.label, 0)
+    if prune_missing:
+        gone_doctrines = (
+            Doctrine.objects.from_source(source)
+            .exclude(external_id__in=list(doctrines))
+            .exclude(status=Doctrine.Status.ARCHIVED)
+        )
+        result.doctrines_archived = gone_doctrines.update(status=Doctrine.Status.ARCHIVED)
+
+        gone_fittings = (
+            Fitting.objects.from_source(source)
+            .exclude(external_id__in=list(fittings))
+            .exclude(doctrine_fittings__doctrine__source=Source.LOCAL)
+        )
+        _total, deleted = gone_fittings.delete()
+        result.fittings_removed = deleted.get(Fitting._meta.label, 0)
     return result
 
 

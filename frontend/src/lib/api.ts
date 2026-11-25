@@ -61,6 +61,8 @@ export const api = {
     sessionid: string;
     include_standalone_fits: boolean;
     include_categories: boolean;
+    limit: number | null;
+    skip_existing: boolean;
   }) =>
     request<RemoteScrapePreview>("settings/remote-scrape/", {
       method: "POST",
@@ -71,6 +73,8 @@ export const api = {
     sessionid: string;
     include_standalone_fits: boolean;
     include_categories: boolean;
+    limit: number | null;
+    skip_existing: boolean;
   }) =>
     request<RemoteScrapeImportResult>("settings/remote-scrape/", {
       method: "POST",

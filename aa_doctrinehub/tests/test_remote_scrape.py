@@ -202,3 +202,32 @@ def test_remote_scrape_api_endpoint_requires_permission_and_imports(client):
         )
         assert resp_imp.status_code == 200
         assert resp_imp.json()["doctrines_created"] == 1
+
+
+def test_batched_scrape_skips_existing_and_preserves_earlier_batches():
+    base = "https://other.example"
+    pages = {
+        f"{base}/fittings/fit/all/": _FakeResp(FITS_LIST_HTML, f"{base}/fittings/fit/all/"),
+        f"{base}/fittings/": _FakeResp(INDEX_HTML, f"{base}/fittings/"),
+        f"{base}/fittings/doctrine/11/": _FakeResp(DOCTRINE_HTML, f"{base}/fittings/doctrine/11/"),
+        f"{base}/fittings/fit/101/": _FakeResp(FIT_101_HTML, f"{base}/fittings/fit/101/"),
+        f"{base}/fittings/fit/102/": _FakeResp(FIT_102_HTML, f"{base}/fittings/fit/102/"),
+        f"{base}/fittings/cat/all/": _FakeResp(CATS_LIST_HTML, f"{base}/fittings/cat/all/"),
+        f"{base}/fittings/cat/7/": _FakeResp(CAT_7_HTML, f"{base}/fittings/cat/7/"),
+    }
+
+    with patch("requests.Session.get", new=_fake_get_factory(pages)):
+        snap1 = scrape_remote_fittings_site(base, "abc", limit=1, skip_existing=True, request_delay=0)
+    assert len(snap1.fittings) == 1
+    assert snap1.fittings[0].external_id == 101
+    res1 = import_remote_scrape(snap1, prune_missing=False)
+    assert res1.fittings_created == 1
+
+    with patch("requests.Session.get", new=_fake_get_factory(pages)):
+        snap2 = scrape_remote_fittings_site(base, "abc", limit=1, skip_existing=True, request_delay=0)
+    assert len(snap2.fittings) == 1
+    assert snap2.fittings[0].external_id == 102
+    res2 = import_remote_scrape(snap2, prune_missing=False)
+    assert res2.fittings_created == 1
+    assert res2.fittings_removed == 0
+    assert Fitting.objects.from_source(Source.REMOTE_AUTH).count() == 2
