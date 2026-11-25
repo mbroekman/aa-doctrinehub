@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, Pencil, Play, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -512,6 +512,7 @@ export function RulesView({
   const [notif, setNotif] = useState<NotificationSettings | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [expandedRules, setExpandedRules] = useState<Record<number, boolean>>({});
 
   const [editingRuleId, setEditingRuleId] = useState<number | null>(null);
   const [name, setName] = useState("");
@@ -837,25 +838,61 @@ export function RulesView({
                   </Button>
                 </div>
               </div>
-              {r.evaluations && r.evaluations.length > 0 && (
-                <div className="space-y-1 border-t border-border/50 pt-2 text-xs">
-                  {r.evaluations.map((ev) => (
-                    <div key={ev.username} className="flex flex-wrap items-start gap-2">
-                      <Badge
-                        variant={
-                          ev.status === "pass" ? "default" : ev.status === "fail" ? "destructive" : "outline"
-                        }
-                      >
-                        {ev.status.toUpperCase()}
-                      </Badge>
-                      <span className="font-medium">{ev.username}:</span>
-                      <span className="text-muted-foreground">
-                        {ev.reasons.length ? ev.reasons.join(" · ") : "No details"}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {r.evaluations && r.evaluations.length > 0 && (() => {
+                const isOpen = Boolean(expandedRules[r.id]);
+                return (
+                  <div className="border-t border-border/50 pt-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedRules((prev) => ({ ...prev, [r.id]: !prev[r.id] }))
+                      }
+                      className="flex w-full items-center justify-between font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      <span>Evaluation Results ({r.evaluations.length} users)</span>
+                      {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </button>
+                    {isOpen && (
+                      <div className="mt-2 max-h-72 space-y-2 overflow-y-auto">
+                        {r.evaluations.map((ev) => (
+                          <div key={ev.username} className="rounded-md border border-border/60 p-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5">
+                                <Badge
+                                  variant={
+                                    ev.status === "pass"
+                                      ? "default"
+                                      : ev.status === "fail"
+                                        ? "destructive"
+                                        : "outline"
+                                  }
+                                >
+                                  {ev.status.toUpperCase()}
+                                </Badge>
+                                <span className="font-medium">{ev.username}</span>
+                              </div>
+                              <span className="text-[11px] text-muted-foreground">
+                                {ev.evaluated_at ? new Date(ev.evaluated_at).toLocaleString() : ""}
+                                {ev.grace_until ? ` · grace until ${new Date(ev.grace_until).toLocaleString()}` : ""}
+                              </span>
+                            </div>
+                            {ev.reasons.length > 0 && (
+                              <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-muted-foreground">
+                                {ev.reasons
+                                  .flatMap((reason) => reason.split(/\s*\|\s*|\s*;\s*/))
+                                  .filter(Boolean)
+                                  .map((part, i) => (
+                                    <li key={i}>{part}</li>
+                                  ))}
+                              </ul>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           ))}
         </CardContent>
