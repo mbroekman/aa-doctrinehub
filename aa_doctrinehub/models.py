@@ -83,9 +83,14 @@ class Category(SourcedModel):
         verbose_name_plural = _("Categories")
         ordering = ["name"]
         constraints = [
+            # No condition: MariaDB can't enforce a conditional unique
+            # constraint at all (Django W036) and silently skips creating
+            # it. A plain constraint gives the same result on every
+            # backend anyway - SQL treats each NULL external_id as
+            # distinct, so local (non-synced) rows are unaffected - and
+            # it is the one that actually gets enforced on MariaDB.
             models.UniqueConstraint(
                 fields=["source", "external_id"],
-                condition=models.Q(external_id__isnull=False),
                 name="doctrinehub_category_unique_external",
             )
         ]
@@ -110,9 +115,9 @@ class Fitting(SourcedModel):
         verbose_name_plural = _("Fittings")
         ordering = ["ship_type_name", "name"]
         constraints = [
+            # See Category.Meta.constraints for why this has no condition.
             models.UniqueConstraint(
                 fields=["source", "external_id"],
-                condition=models.Q(external_id__isnull=False),
                 name="doctrinehub_fitting_unique_external",
             )
         ]
@@ -191,9 +196,9 @@ class Doctrine(SourcedModel):
         verbose_name_plural = _("Doctrines")
         ordering = ["name"]
         constraints = [
+            # See Category.Meta.constraints for why this has no condition.
             models.UniqueConstraint(
                 fields=["source", "external_id"],
-                condition=models.Q(external_id__isnull=False),
                 name="doctrinehub_doctrine_unique_external",
             )
         ]
