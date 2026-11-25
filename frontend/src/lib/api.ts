@@ -71,6 +71,7 @@ export const api = {
     include_standalone_fits: boolean;
     include_categories: boolean;
     limit: number | null;
+    offset: number;
     overwrite_existing: boolean;
   }) =>
     request<RemoteScrapePreview>("settings/remote-scrape/", {
@@ -83,6 +84,7 @@ export const api = {
     include_standalone_fits: boolean;
     include_categories: boolean;
     limit: number | null;
+    offset: number;
     overwrite_existing: boolean;
   }) =>
     request<RemoteScrapeImportResult>("settings/remote-scrape/", {

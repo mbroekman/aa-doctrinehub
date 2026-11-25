@@ -236,6 +236,14 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
         if limit < 1:
             return JsonResponse({"error": "limit must be at least 1"}, status=400)
 
+    raw_offset = body.get("offset", 0)
+    try:
+        offset = int(raw_offset or 0)
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "offset must be a non-negative whole number"}, status=400)
+    if offset < 0:
+        return JsonResponse({"error": "offset must be at least 0"}, status=400)
+
     try:
         if mode == "preview":
             return JsonResponse(
@@ -245,6 +253,7 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
                     include_standalone_fits=include_standalone_fits,
                     include_categories=include_categories,
                     limit=limit,
+                    offset=offset,
                     skip_existing=skip_existing,
                 )
             )
@@ -254,12 +263,13 @@ def remote_scrape(request: HttpRequest) -> JsonResponse:
             include_standalone_fits=include_standalone_fits,
             include_categories=include_categories,
             limit=limit,
+            offset=offset,
             skip_existing=skip_existing,
         )
     except RemoteScrapeError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
-    prune_missing = limit is None and not skip_existing
+    prune_missing = limit is None and offset == 0 and not skip_existing
     result = import_remote_scrape(snapshot, prune_missing=prune_missing)
     from .models import Doctrine as DoctrineModel, Source as SourceChoices
 

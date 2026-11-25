@@ -275,3 +275,33 @@ def test_remote_scrape_purge_deletes_remote_auth_only(client):
     assert data["categories_deleted"] == 1
     assert not Fitting.objects.filter(pk=remote_fit.pk).exists()
     assert Fitting.objects.filter(pk=local_fit.pk).exists()
+
+
+def test_batched_scrape_with_offset_advances_through_existing_items():
+    base = "https://other.example"
+    pages = {
+        f"{base}/fittings/fit/all/": _FakeResp(FITS_LIST_HTML, f"{base}/fittings/fit/all/"),
+        f"{base}/fittings/": _FakeResp(INDEX_HTML, f"{base}/fittings/"),
+        f"{base}/fittings/doctrine/11/": _FakeResp(DOCTRINE_HTML, f"{base}/fittings/doctrine/11/"),
+        f"{base}/fittings/fit/101/": _FakeResp(FIT_101_HTML, f"{base}/fittings/fit/101/"),
+        f"{base}/fittings/fit/102/": _FakeResp(FIT_102_HTML, f"{base}/fittings/fit/102/"),
+        f"{base}/fittings/cat/all/": _FakeResp(CATS_LIST_HTML, f"{base}/fittings/cat/all/"),
+        f"{base}/fittings/cat/7/": _FakeResp(CAT_7_HTML, f"{base}/fittings/cat/7/"),
+    }
+
+    with patch("requests.Session.get", new=_fake_get_factory(pages)):
+        snap1 = scrape_remote_fittings_site(
+            base, "abc", limit=1, offset=0, skip_existing=False, include_categories=False, request_delay=0
+        )
+    assert len(snap1.doctrines) == 1
+    assert {f.external_id for f in snap1.fittings} == {101, 102}
+    import_remote_scrape(snap1, prune_missing=False)
+
+    # Offset 1 skips doctrine 11 (only 1 doctrine on source) and picks the 2nd fit (102)
+    with patch("requests.Session.get", new=_fake_get_factory(pages)):
+        snap2 = scrape_remote_fittings_site(
+            base, "abc", limit=1, offset=1, skip_existing=False, include_categories=False, request_delay=0
+        )
+    assert len(snap2.doctrines) == 0
+    assert [f.external_id for f in snap2.fittings] == [102]
+    assert Doctrine.objects.from_source(Source.REMOTE_AUTH).count() == 1

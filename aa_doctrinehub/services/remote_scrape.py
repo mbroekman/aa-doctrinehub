@@ -271,6 +271,7 @@ def scrape_remote_fittings_site(
     include_standalone_fits: bool = True,
     include_categories: bool = True,
     limit: int | None = None,
+    offset: int = 0,
     skip_existing: bool = False,
     timeout: int = 15,
     request_delay: float = 0.05,
@@ -307,9 +308,9 @@ def scrape_remote_fittings_site(
             if x is not None
         }
 
+    start = max(0, offset)
     doc_items = [(did, name) for did, name in doctrine_links.items() if did not in existing_doc_ids]
-    if limit is not None and limit > 0:
-        doc_items = doc_items[:limit]
+    doc_items = doc_items[start : start + limit] if limit is not None and limit > 0 else doc_items[start:]
 
     snapshot = SourceSnapshot()
     doctrine_fit_ids: list[int] = []
@@ -336,7 +337,9 @@ def scrape_remote_fittings_site(
         if fid not in seen_doc_fit_ids and fid not in existing_fit_ids
     ]
     if limit is not None and limit > 0:
-        standalone_fit_items = standalone_fit_items[:limit]
+        standalone_fit_items = standalone_fit_items[start : start + limit]
+    else:
+        standalone_fit_items = standalone_fit_items[start:]
 
     for fit_id, f_name in [*required_fit_items, *standalone_fit_items]:
         if request_delay > 0:
@@ -350,7 +353,9 @@ def scrape_remote_fittings_site(
         cat_links = _extract_links(cats_soup, CAT_DETAIL_RE)
         cat_items = [(cid, name) for cid, name in cat_links.items() if cid not in existing_cat_ids]
         if limit is not None and limit > 0:
-            cat_items = cat_items[:limit]
+            cat_items = cat_items[start : start + limit]
+        else:
+            cat_items = cat_items[start:]
         for cat_id, c_name in cat_items:
             if request_delay > 0:
                 time.sleep(request_delay)
@@ -407,6 +412,7 @@ def preview_remote_fittings_site(
     include_standalone_fits: bool = True,
     include_categories: bool = True,
     limit: int | None = None,
+    offset: int = 0,
     skip_existing: bool = False,
     timeout: int = 15,
 ) -> dict[str, Any]:
@@ -457,14 +463,15 @@ def preview_remote_fittings_site(
         if not (skip_existing and cid in existing_cat_ids)
     ]
 
+    start = max(0, offset)
     if limit is not None and limit > 0:
-        doc_batch = doc_candidates[:limit]
-        fit_batch = fit_candidates[:limit]
-        cat_batch = cat_candidates[:limit]
+        doc_batch = doc_candidates[start : start + limit]
+        fit_batch = fit_candidates[start : start + limit]
+        cat_batch = cat_candidates[start : start + limit]
     else:
-        doc_batch = doc_candidates
-        fit_batch = fit_candidates
-        cat_batch = cat_candidates
+        doc_batch = doc_candidates[start:]
+        fit_batch = fit_candidates[start:]
+        cat_batch = cat_candidates[start:]
 
     doctrines_new = sum(1 for did, _ in doc_batch if did not in existing_doc_ids)
     fittings_new = sum(1 for fid, _ in fit_batch if fid not in existing_fit_ids)

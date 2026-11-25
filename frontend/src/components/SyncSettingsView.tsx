@@ -20,6 +20,7 @@ export function SyncSettingsView() {
   const [includeStandalone, setIncludeStandalone] = useState(true);
   const [includeCategories, setIncludeCategories] = useState(true);
   const [batchLimit, setBatchLimit] = useState("25");
+  const [batchOffset, setBatchOffset] = useState("0");
   const [overwriteExisting, setOverwriteExisting] = useState(false);
   const [scrapeModeBusy, setScrapeModeBusy] = useState<"preview" | "import" | null>(null);
   const [scrapeError, setScrapeError] = useState("");
@@ -65,19 +66,25 @@ export function SyncSettingsView() {
     }
     try {
       const parsedLimit = batchLimit.trim() ? Number(batchLimit.trim()) : null;
+      const parsedOffset = Math.max(0, Number(batchOffset.trim() || "0") || 0);
       const payload = {
         base_url: remoteUrl,
         sessionid: remoteSessionId,
         include_standalone_fits: includeStandalone,
         include_categories: includeCategories,
         limit: parsedLimit && parsedLimit > 0 ? parsedLimit : null,
+        offset: parsedOffset,
         overwrite_existing: overwriteExisting,
       };
       if (mode === "preview") {
         setScrapePreview(await api.remoteScrapePreview(payload));
       } else {
-        setScrapeResult(await api.remoteScrapeImport(payload));
+        const res = await api.remoteScrapeImport(payload);
+        setScrapeResult(res);
         setScrapePreview(null);
+        if (overwriteExisting && payload.limit && (res.doctrines.length > 0 || res.fittings_created + res.fittings_updated > 0)) {
+          setBatchOffset(String(parsedOffset + payload.limit));
+        }
       }
     } catch (e) {
       setScrapeError((e as Error).message);
@@ -201,10 +208,24 @@ export function SyncSettingsView() {
               />
             </label>
             <label className="flex items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Start at # (offset)</span>
+              <Input
+                type="number"
+                min={0}
+                className="w-24"
+                value={batchOffset}
+                onChange={(e) => setBatchOffset(e.target.value)}
+              />
+            </label>
+            <label className="flex items-center gap-2">
               <input
                 type="checkbox"
                 checked={overwriteExisting}
-                onChange={(e) => setOverwriteExisting(e.target.checked)}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setOverwriteExisting(checked);
+                  if (!checked) setBatchOffset("0");
+                }}
               />
               Overwrite existing
             </label>
