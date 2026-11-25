@@ -396,52 +396,73 @@ export function RulesView({
                     )}
                   </div>
 
-                  {cond.type === "can_fly_fitting" && (
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      <div className="space-y-1 sm:col-span-2">
-                        <label className="text-xs text-muted-foreground">Fitting</label>
-                        <Input
-                          placeholder="Search fitting or ship..."
-                          value={fittingQuery}
-                          onChange={(e) => setFittingQuery(e.target.value)}
-                          className="h-8 text-xs"
-                        />
-                        <select
-                          value={cond.fittingId}
-                          onChange={(e) => updateCond(idx, { fittingId: Number(e.target.value) })}
-                          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                        >
-                          {fittings
-                            .filter((f) => {
-                              const q = fittingQuery.trim().toLowerCase();
-                              return !q || `${f.ship_type_name} ${f.name}`.toLowerCase().includes(q);
-                            })
-                            .map((f) => (
+                  {cond.type === "can_fly_fitting" && (() => {
+                    const fq = fittingQuery.trim().toLowerCase();
+                    const filteredFittings = fittings.filter(
+                      (f) => !fq || `${f.ship_type_name} ${f.name}`.toLowerCase().includes(fq),
+                    );
+                    const effectiveFittingId = filteredFittings.some((f) => f.id === cond.fittingId)
+                      ? cond.fittingId
+                      : (filteredFittings[0]?.id ?? 0);
+                    return (
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <div className="space-y-1 sm:col-span-2">
+                          <label className="text-xs text-muted-foreground">Fitting</label>
+                          <Input
+                            placeholder="Search fitting or ship..."
+                            value={fittingQuery}
+                            onChange={(e) => {
+                              const nextQ = e.target.value;
+                              setFittingQuery(nextQ);
+                              const q = nextQ.trim().toLowerCase();
+                              const firstMatch = fittings.find(
+                                (f) => !q || `${f.ship_type_name} ${f.name}`.toLowerCase().includes(q),
+                              );
+                              if (firstMatch && firstMatch.id !== cond.fittingId) {
+                                updateCond(idx, { fittingId: firstMatch.id });
+                              }
+                            }}
+                            className="h-8 text-xs"
+                          />
+                          <select
+                            value={effectiveFittingId}
+                            onChange={(e) => updateCond(idx, { fittingId: Number(e.target.value) })}
+                            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          >
+                            {filteredFittings.map((f) => (
                               <option key={f.id} value={f.id}>
                                 {f.ship_type_name} — {f.name}
                               </option>
                             ))}
-                          {!fittings.length && <option value={0}>No fittings available</option>}
-                        </select>
+                            {!filteredFittings.length && <option value={0}>No fittings match</option>}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs text-muted-foreground">Skill target</label>
+                          <select
+                            value={cond.fittingLevel}
+                            onChange={(e) =>
+                              updateCond(idx, { fittingLevel: e.target.value as "minimum" | "recommended" })
+                            }
+                            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          >
+                            <option value="minimum">Minimum</option>
+                            <option value="recommended">Recommended</option>
+                          </select>
+                        </div>
                       </div>
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Skill target</label>
-                        <select
-                          value={cond.fittingLevel}
-                          onChange={(e) =>
-                            updateCond(idx, { fittingLevel: e.target.value as "minimum" | "recommended" })
-                          }
-                          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                        >
-                          <option value="minimum">Minimum</option>
-                          <option value="recommended">Recommended</option>
-                        </select>
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {cond.type === "doctrine_coverage" && (() => {
-                    const selectedDoc = doctrines.find((d) => d.id === cond.doctrineId);
+                    const dq = doctrineQuery.trim().toLowerCase();
+                    const filteredDocs = doctrines.filter(
+                      (d) => !dq || d.name.toLowerCase().includes(dq),
+                    );
+                    const effectiveDocId = filteredDocs.some((d) => d.id === cond.doctrineId)
+                      ? cond.doctrineId
+                      : (filteredDocs[0]?.id ?? 0);
+                    const selectedDoc = doctrines.find((d) => d.id === effectiveDocId);
                     const docFittings = selectedDoc?.fittings ?? [];
                     return (
                       <div className="space-y-2">
@@ -451,27 +472,32 @@ export function RulesView({
                             <Input
                               placeholder="Search doctrine..."
                               value={doctrineQuery}
-                              onChange={(e) => setDoctrineQuery(e.target.value)}
+                              onChange={(e) => {
+                                const nextQ = e.target.value;
+                                setDoctrineQuery(nextQ);
+                                const q = nextQ.trim().toLowerCase();
+                                const firstMatch = doctrines.find(
+                                  (d) => !q || d.name.toLowerCase().includes(q),
+                                );
+                                if (firstMatch && firstMatch.id !== cond.doctrineId) {
+                                  updateCond(idx, { doctrineId: firstMatch.id, doctrineFittingId: 0 });
+                                }
+                              }}
                               className="h-8 text-xs"
                             />
                             <select
-                              value={cond.doctrineId}
+                              value={effectiveDocId}
                               onChange={(e) =>
                                 updateCond(idx, { doctrineId: Number(e.target.value), doctrineFittingId: 0 })
                               }
                               className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                             >
-                              {doctrines
-                                .filter((d) => {
-                                  const q = doctrineQuery.trim().toLowerCase();
-                                  return !q || d.name.toLowerCase().includes(q);
-                                })
-                                .map((d) => (
-                                  <option key={d.id} value={d.id}>
-                                    {d.name}
-                                  </option>
-                                ))}
-                              {!doctrines.length && <option value={0}>No doctrines available</option>}
+                              {filteredDocs.map((d) => (
+                                <option key={d.id} value={d.id}>
+                                  {d.name} ({d.fittings.length} fits)
+                                </option>
+                              ))}
+                              {!filteredDocs.length && <option value={0}>No doctrines match</option>}
                             </select>
                           </div>
                           <div className="space-y-1">
