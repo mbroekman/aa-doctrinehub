@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- **Python 3.10 support dropped.** Minimum supported version is now Python 3.11.
+
 ### Added
 
 - **Dutch translation:** `locale/nl` for model names, statuses and roles.
