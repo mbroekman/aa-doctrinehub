@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, Play, Plus, Trash2, X } from "lucide-react";
+import { Check, Copy, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -87,6 +87,54 @@ function toConditionNode(c: DraftCondition): RuleConditionNode {
   }
 }
 
+function fromConditionNode(
+  node: RuleConditionNode,
+  doctrines: Doctrine[],
+  fittings: FittingSummary[],
+  groups: { id: number; name: string }[],
+): DraftCondition {
+  const base = makeDefaultCondition(doctrines, fittings, groups);
+  const t = String(node.type || base.type);
+  return {
+    ...base,
+    type: t,
+    fittingId: Number(node.fitting_id ?? base.fittingId),
+    fittingLevel: node.level === "recommended" ? "recommended" : "minimum",
+    doctrineId: Number(node.doctrine_id ?? base.doctrineId),
+    minPct: Number(node.min_required_pct ?? base.minPct),
+    skillId: Number(node.skill_id ?? base.skillId),
+    minSkillLevel: Number(node.min_level ?? base.minSkillLevel),
+    minSp: Number(node.min_sp ?? base.minSp),
+    shipTypeId: Number(node.ship_type_id ?? base.shipTypeId),
+    minCount: Number(node.min_count ?? base.minCount),
+    implantName: String(node.type_name ?? ""),
+    otherGroupId: Number(node.group_id ?? base.otherGroupId),
+    days: Number(node.days ?? base.days),
+    minFats: Number(node.min_fats ?? base.minFats),
+  };
+}
+
+function parseConditionTree(
+  tree: RuleConditionNode,
+  doctrines: Doctrine[],
+  fittings: FittingSummary[],
+  groups: { id: number; name: string }[],
+): { op: "AND" | "OR" | "AT_LEAST"; n: number; conditions: DraftCondition[] } {
+  const rawOp = String(tree.op || "AND").toUpperCase();
+  const op: "AND" | "OR" | "AT_LEAST" =
+    rawOp === "OR" ? "OR" : rawOp === "AT_LEAST" ? "AT_LEAST" : "AND";
+  const n = Number(tree.n ?? 1);
+  const rawChildren = Array.isArray(tree.children) && tree.children.length
+    ? tree.children
+    : tree.type
+      ? [tree]
+      : [];
+  const conditions = rawChildren.length
+    ? rawChildren.map((ch) => fromConditionNode(ch, doctrines, fittings, groups))
+    : [makeDefaultCondition(doctrines, fittings, groups)];
+  return { op, n, conditions };
+}
+
 export function RulesView({
   doctrines,
   fittings,
@@ -102,6 +150,7 @@ export function RulesView({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const [editingRuleId, setEditingRuleId] = useState<number | null>(null);
   const [name, setName] = useState("");
   const [groupId, setGroupId] = useState<number>(0);
   const [mode, setMode] = useState<ComplianceRule["mode"]>("report_only");
@@ -111,6 +160,28 @@ export function RulesView({
   const [conditions, setConditions] = useState<DraftCondition[]>(() => [
     makeDefaultCondition(doctrines, fittings, []),
   ]);
+
+  const resetBuilder = () => {
+    setEditingRuleId(null);
+    setName("");
+    setMode("report_only");
+    setOp("AND");
+    setAtLeastN(1);
+    setGraceHours(48);
+    setConditions([makeDefaultCondition(doctrines, fittings, groups)]);
+  };
+
+  const loadIntoBuilder = (rule: ComplianceRule, asCopy: boolean) => {
+    const parsed = parseConditionTree(rule.condition_tree || {}, doctrines, fittings, groups);
+    setEditingRuleId(asCopy ? null : rule.id);
+    setName(asCopy ? `${rule.name} (copy)` : rule.name);
+    setGroupId(rule.group_id);
+    setMode(asCopy ? "report_only" : rule.mode);
+    setOp(parsed.op);
+    setAtLeastN(parsed.n);
+    setGraceHours(rule.grace_period_hours);
+    setConditions(parsed.conditions);
+  };
 
   const load = useCallback(() => {
     setError("");
@@ -132,7 +203,7 @@ export function RulesView({
     setConditions((prev) => prev.map((item, i) => (i === idx ? { ...item, ...patch } : item)));
   };
 
-  const handleCreate = async () => {
+  const handleSaveRule = async () => {
     if (!name.trim() || !groupId || !conditions.length) return;
     setBusy(true);
     try {
@@ -141,15 +212,19 @@ export function RulesView({
         ...(op === "AT_LEAST" ? { n: Math.min(atLeastN, conditions.length) } : {}),
         children: conditions.map(toConditionNode),
       };
-      await api.createRule({
+      const payload = {
         name: name.trim(),
         group_id: groupId,
         mode,
         grace_period_hours: graceHours,
         condition_tree: tree,
-      });
-      setName("");
-      setConditions([makeDefaultCondition(doctrines, fittings, groups)]);
+      };
+      if (editingRuleId !== null) {
+        await api.updateRule(editingRuleId, payload);
+      } else {
+        await api.createRule(payload);
+      }
+      resetBuilder();
       load();
     } catch (e) {
       setError((e as Error).message);
@@ -186,7 +261,9 @@ export function RulesView({
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Rule Builder</CardTitle>
+            <CardTitle className="text-base">
+              {editingRuleId !== null ? "Edit Rule" : "Rule Builder"}
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -477,10 +554,17 @@ export function RulesView({
               ))}
             </div>
 
-            <Button size="sm" onClick={handleCreate} disabled={busy || !name.trim()}>
-              <Plus className="mr-1 h-3.5 w-3.5" />
-              Create Rule
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={handleSaveRule} disabled={busy || !name.trim()}>
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                {editingRuleId !== null ? "Save Changes" : "Create Rule"}
+              </Button>
+              {editingRuleId !== null && (
+                <Button size="sm" variant="outline" onClick={resetBuilder} disabled={busy}>
+                  Cancel
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
 
@@ -561,7 +645,15 @@ export function RulesView({
                   <option value="automatic">Automatic</option>
                   <option value="reviewer_approval">Reviewer approval</option>
                 </select>
-                <Button size="sm" variant="ghost" onClick={() => void api.deleteRule(r.id).then(load)}>
+                <Button size="sm" variant="outline" onClick={() => loadIntoBuilder(r, false)} title="Edit rule">
+                  <Pencil className="mr-1 h-3.5 w-3.5" />
+                  Edit
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => loadIntoBuilder(r, true)} title="Copy rule">
+                  <Copy className="mr-1 h-3.5 w-3.5" />
+                  Copy
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => void api.deleteRule(r.id).then(load)} title="Delete rule">
                   <Trash2 className="h-3.5 w-3.5 text-destructive" />
                 </Button>
               </div>
