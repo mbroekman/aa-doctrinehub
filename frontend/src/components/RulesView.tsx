@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ const CONDITION_TYPES = [
 ];
 
 interface DraftCondition {
+  uid: number;
   type: string;
   fittingId: number;
   fittingLevel: "minimum" | "recommended";
@@ -44,12 +45,15 @@ interface DraftCondition {
   minFats: number;
 }
 
+let nextCondUid = 1;
+
 function makeDefaultCondition(
   doctrines: Doctrine[],
   fittings: FittingSummary[],
   groups: { id: number; name: string }[],
 ): DraftCondition {
   return {
+    uid: nextCondUid++,
     type: fittings.length ? "can_fly_fitting" : doctrines.length ? "doctrine_coverage" : "skill",
     fittingId: fittings[0]?.id ?? 0,
     fittingLevel: "minimum",
@@ -140,6 +144,329 @@ function parseConditionTree(
   return { op, n, conditions };
 }
 
+function ConditionEditor({
+  cond,
+  canRemove,
+  doctrines,
+  fittings,
+  groups,
+  onChange,
+  onRemove,
+}: {
+  cond: DraftCondition;
+  canRemove: boolean;
+  doctrines: Doctrine[];
+  fittings: FittingSummary[];
+  groups: { id: number; name: string }[];
+  onChange: (patch: Partial<DraftCondition>) => void;
+  onRemove: () => void;
+}) {
+  const [skillQuery, setSkillQuery] = useState("");
+  const [skillOptions, setSkillOptions] = useState<{ id: number; name: string }[]>([]);
+  const [fittingQuery, setFittingQuery] = useState("");
+  const [doctrineQuery, setDoctrineQuery] = useState("");
+
+  useEffect(() => {
+    if (cond.type !== "skill") return;
+    const timer = window.setTimeout(() => {
+      api.searchSkills(skillQuery).then(setSkillOptions).catch(() => undefined);
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [skillQuery, cond.type]);
+
+  return (
+    <div className="space-y-2 rounded-md border border-border p-2.5">
+      <div className="flex items-center gap-2">
+        <select
+          value={cond.type}
+          onChange={(e) => onChange({ type: e.target.value })}
+          className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+        >
+          {CONDITION_TYPES.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+        {canRemove && (
+          <Button size="sm" variant="ghost" onClick={onRemove} title="Remove condition">
+            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+          </Button>
+        )}
+      </div>
+
+      {cond.type === "can_fly_fitting" && (() => {
+        const fq = fittingQuery.trim().toLowerCase();
+        const filteredFittings = fittings.filter(
+          (f) => !fq || `${f.ship_type_name} ${f.name}`.toLowerCase().includes(fq),
+        );
+        const effectiveFittingId = filteredFittings.some((f) => f.id === cond.fittingId)
+          ? cond.fittingId
+          : (filteredFittings[0]?.id ?? 0);
+        return (
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="space-y-1 sm:col-span-2">
+              <label className="text-xs text-muted-foreground">Fitting</label>
+              <Input
+                placeholder="Search fitting or ship..."
+                value={fittingQuery}
+                onChange={(e) => {
+                  const nextQ = e.target.value;
+                  setFittingQuery(nextQ);
+                  const q = nextQ.trim().toLowerCase();
+                  const firstMatch = fittings.find(
+                    (f) => !q || `${f.ship_type_name} ${f.name}`.toLowerCase().includes(q),
+                  );
+                  if (firstMatch && firstMatch.id !== cond.fittingId) {
+                    onChange({ fittingId: firstMatch.id });
+                  }
+                }}
+                className="h-8 text-xs"
+              />
+              <select
+                value={effectiveFittingId}
+                onChange={(e) => onChange({ fittingId: Number(e.target.value) })}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                {filteredFittings.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.ship_type_name} — {f.name}
+                  </option>
+                ))}
+                {!filteredFittings.length && <option value={0}>No fittings match</option>}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Skill target</label>
+              <select
+                value={cond.fittingLevel}
+                onChange={(e) => onChange({ fittingLevel: e.target.value as "minimum" | "recommended" })}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="minimum">Minimum</option>
+                <option value="recommended">Recommended</option>
+              </select>
+            </div>
+          </div>
+        );
+      })()}
+
+      {cond.type === "doctrine_coverage" && (() => {
+        const dq = doctrineQuery.trim().toLowerCase();
+        const filteredDocs = doctrines.filter(
+          (d) => !dq || d.name.toLowerCase().includes(dq),
+        );
+        const effectiveDocId = filteredDocs.some((d) => d.id === cond.doctrineId)
+          ? cond.doctrineId
+          : (filteredDocs[0]?.id ?? 0);
+        const selectedDoc = doctrines.find((d) => d.id === effectiveDocId);
+        const docFittings = selectedDoc?.fittings ?? [];
+        return (
+          <div className="space-y-2">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Doctrine</label>
+                <Input
+                  placeholder="Search doctrine..."
+                  value={doctrineQuery}
+                  onChange={(e) => {
+                    const nextQ = e.target.value;
+                    setDoctrineQuery(nextQ);
+                    const q = nextQ.trim().toLowerCase();
+                    const firstMatch = doctrines.find(
+                      (d) => !q || d.name.toLowerCase().includes(q),
+                    );
+                    if (firstMatch && firstMatch.id !== cond.doctrineId) {
+                      onChange({ doctrineId: firstMatch.id, doctrineFittingId: 0 });
+                    }
+                  }}
+                  className="h-8 text-xs"
+                />
+                <select
+                  value={effectiveDocId}
+                  onChange={(e) => onChange({ doctrineId: Number(e.target.value), doctrineFittingId: 0 })}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {filteredDocs.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} ({d.fittings.length} fits)
+                    </option>
+                  ))}
+                  {!filteredDocs.length && <option value={0}>No doctrines match</option>}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Doctrine scope (All or specific fit)</label>
+                <select
+                  value={cond.doctrineFittingId}
+                  onChange={(e) => onChange({ doctrineFittingId: Number(e.target.value) })}
+                  className="mt-9 h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value={0}>All required fittings (%)</option>
+                  {docFittings.map((df) => (
+                    <option key={df.id} value={df.id}>
+                      {df.ship_type_name} — {df.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            {cond.doctrineFittingId > 0 ? (
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Skill target</label>
+                <select
+                  value={cond.fittingLevel}
+                  onChange={(e) => onChange({ fittingLevel: e.target.value as "minimum" | "recommended" })}
+                  className="h-9 w-48 rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="minimum">Minimum</option>
+                  <option value="recommended">Recommended</option>
+                </select>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Required coverage (%)</label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={cond.minPct}
+                  onChange={(e) => onChange({ minPct: Number(e.target.value) })}
+                  className="w-32"
+                />
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {cond.type === "skill" && (
+        <div className="grid gap-2 sm:grid-cols-3">
+          <div className="space-y-1 sm:col-span-2">
+            <label className="text-xs text-muted-foreground">Skill</label>
+            <Input
+              placeholder="Search skill by name or ID..."
+              value={skillQuery}
+              onChange={(e) => setSkillQuery(e.target.value)}
+              className="h-8 text-xs"
+            />
+            <select
+              value={cond.skillId}
+              onChange={(e) => onChange({ skillId: Number(e.target.value) })}
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              {!skillOptions.some((s) => s.id === cond.skillId) && cond.skillId > 0 && (
+                <option value={cond.skillId}>Skill #{cond.skillId}</option>
+              )}
+              {skillOptions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} ({s.id})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Minimum level (1–5)</label>
+            <Input
+              type="number"
+              min={1}
+              max={5}
+              value={cond.minSkillLevel}
+              onChange={(e) => onChange({ minSkillLevel: Number(e.target.value) })}
+            />
+          </div>
+        </div>
+      )}
+
+      {cond.type === "total_sp" && (
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Minimum Total Skillpoints</label>
+          <Input
+            type="number"
+            min={0}
+            step={1000000}
+            value={cond.minSp}
+            onChange={(e) => onChange({ minSp: Number(e.target.value) })}
+          />
+        </div>
+      )}
+
+      {cond.type === "ship_owned" && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Ship Type ID</label>
+            <Input
+              type="number"
+              value={cond.shipTypeId}
+              onChange={(e) => onChange({ shipTypeId: Number(e.target.value) })}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Minimum hulls owned</label>
+            <Input
+              type="number"
+              min={1}
+              value={cond.minCount}
+              onChange={(e) => onChange({ minCount: Number(e.target.value) })}
+            />
+          </div>
+        </div>
+      )}
+
+      {cond.type === "implant" && (
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Implant name (contains)</label>
+          <Input
+            placeholder="e.g. High-grade Amulet"
+            value={cond.implantName}
+            onChange={(e) => onChange({ implantName: e.target.value })}
+          />
+        </div>
+      )}
+
+      {cond.type === "other_group" && (
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Required Auth group</label>
+          <select
+            value={cond.otherGroupId}
+            onChange={(e) => onChange({ otherGroupId: Number(e.target.value) })}
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+          >
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {cond.type === "fleet_participation" && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Lookback window (days)</label>
+            <Input
+              type="number"
+              min={1}
+              value={cond.days}
+              onChange={(e) => onChange({ days: Number(e.target.value) })}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Minimum FATs</label>
+            <Input
+              type="number"
+              min={1}
+              value={cond.minFats}
+              onChange={(e) => onChange({ minFats: Number(e.target.value) })}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RulesView({
   doctrines,
   fittings,
@@ -147,6 +474,7 @@ export function RulesView({
   doctrines: Doctrine[];
   fittings: FittingSummary[];
 }) {
+  const builderRef = useRef<HTMLDivElement | null>(null);
   const [rules, setRules] = useState<ComplianceRule[]>([]);
   const [groups, setGroups] = useState<{ id: number; name: string }[]>([]);
   const [approvals, setApprovals] = useState<PendingApprovalItem[]>([]);
@@ -186,19 +514,8 @@ export function RulesView({
     setAtLeastN(parsed.n);
     setGraceHours(rule.grace_period_hours);
     setConditions(parsed.conditions);
+    builderRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
-
-  const [skillQuery, setSkillQuery] = useState("");
-  const [skillOptions, setSkillOptions] = useState<{ id: number; name: string }[]>([]);
-  const [fittingQuery, setFittingQuery] = useState("");
-  const [doctrineQuery, setDoctrineQuery] = useState("");
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      api.searchSkills(skillQuery).then(setSkillOptions).catch(() => undefined);
-    }, 150);
-    return () => window.clearTimeout(timer);
-  }, [skillQuery]);
 
   const load = useCallback(() => {
     setError("");
@@ -206,18 +523,18 @@ export function RulesView({
       .then(([r, a, l, n]) => {
         setRules(r.rules);
         setGroups(r.groups);
-        if (!groupId && r.groups.length) setGroupId(r.groups[0].id);
+        setGroupId((prev) => prev || (r.groups[0]?.id ?? 0));
         setApprovals(a.approvals);
         setLogs(l.logs);
         setNotif(n);
       })
       .catch((e: Error) => setError(e.message));
-  }, [groupId]);
+  }, []);
 
   useEffect(load, [load]);
 
-  const updateCond = (idx: number, patch: Partial<DraftCondition>) => {
-    setConditions((prev) => prev.map((item, i) => (i === idx ? { ...item, ...patch } : item)));
+  const updateCond = (uid: number, patch: Partial<DraftCondition>) => {
+    setConditions((prev) => prev.map((item) => (item.uid === uid ? { ...item, ...patch } : item)));
   };
 
   const handleSaveRule = async () => {
@@ -275,11 +592,11 @@ export function RulesView({
         </Button>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div ref={builderRef} className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
-              {editingRuleId !== null ? "Edit Rule" : "Rule Builder"}
+              {editingRuleId !== null ? `Edit Rule: ${name}` : "Rule Builder"}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -371,306 +688,17 @@ export function RulesView({
                 </Button>
               </div>
 
-              {conditions.map((cond, idx) => (
-                <div key={idx} className="space-y-2 rounded-md border border-border p-2.5">
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={cond.type}
-                      onChange={(e) => updateCond(idx, { type: e.target.value })}
-                      className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
-                    >
-                      {CONDITION_TYPES.map((c) => (
-                        <option key={c.value} value={c.value}>
-                          {c.label}
-                        </option>
-                      ))}
-                    </select>
-                    {conditions.length > 1 && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setConditions((prev) => prev.filter((_, i) => i !== idx))}
-                      >
-                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                      </Button>
-                    )}
-                  </div>
-
-                  {cond.type === "can_fly_fitting" && (() => {
-                    const fq = fittingQuery.trim().toLowerCase();
-                    const filteredFittings = fittings.filter(
-                      (f) => !fq || `${f.ship_type_name} ${f.name}`.toLowerCase().includes(fq),
-                    );
-                    const effectiveFittingId = filteredFittings.some((f) => f.id === cond.fittingId)
-                      ? cond.fittingId
-                      : (filteredFittings[0]?.id ?? 0);
-                    return (
-                      <div className="grid gap-2 sm:grid-cols-3">
-                        <div className="space-y-1 sm:col-span-2">
-                          <label className="text-xs text-muted-foreground">Fitting</label>
-                          <Input
-                            placeholder="Search fitting or ship..."
-                            value={fittingQuery}
-                            onChange={(e) => {
-                              const nextQ = e.target.value;
-                              setFittingQuery(nextQ);
-                              const q = nextQ.trim().toLowerCase();
-                              const firstMatch = fittings.find(
-                                (f) => !q || `${f.ship_type_name} ${f.name}`.toLowerCase().includes(q),
-                              );
-                              if (firstMatch && firstMatch.id !== cond.fittingId) {
-                                updateCond(idx, { fittingId: firstMatch.id });
-                              }
-                            }}
-                            className="h-8 text-xs"
-                          />
-                          <select
-                            value={effectiveFittingId}
-                            onChange={(e) => updateCond(idx, { fittingId: Number(e.target.value) })}
-                            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                          >
-                            {filteredFittings.map((f) => (
-                              <option key={f.id} value={f.id}>
-                                {f.ship_type_name} — {f.name}
-                              </option>
-                            ))}
-                            {!filteredFittings.length && <option value={0}>No fittings match</option>}
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs text-muted-foreground">Skill target</label>
-                          <select
-                            value={cond.fittingLevel}
-                            onChange={(e) =>
-                              updateCond(idx, { fittingLevel: e.target.value as "minimum" | "recommended" })
-                            }
-                            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                          >
-                            <option value="minimum">Minimum</option>
-                            <option value="recommended">Recommended</option>
-                          </select>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {cond.type === "doctrine_coverage" && (() => {
-                    const dq = doctrineQuery.trim().toLowerCase();
-                    const filteredDocs = doctrines.filter(
-                      (d) => !dq || d.name.toLowerCase().includes(dq),
-                    );
-                    const effectiveDocId = filteredDocs.some((d) => d.id === cond.doctrineId)
-                      ? cond.doctrineId
-                      : (filteredDocs[0]?.id ?? 0);
-                    const selectedDoc = doctrines.find((d) => d.id === effectiveDocId);
-                    const docFittings = selectedDoc?.fittings ?? [];
-                    return (
-                      <div className="space-y-2">
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <div className="space-y-1">
-                            <label className="text-xs text-muted-foreground">Doctrine</label>
-                            <Input
-                              placeholder="Search doctrine..."
-                              value={doctrineQuery}
-                              onChange={(e) => {
-                                const nextQ = e.target.value;
-                                setDoctrineQuery(nextQ);
-                                const q = nextQ.trim().toLowerCase();
-                                const firstMatch = doctrines.find(
-                                  (d) => !q || d.name.toLowerCase().includes(q),
-                                );
-                                if (firstMatch && firstMatch.id !== cond.doctrineId) {
-                                  updateCond(idx, { doctrineId: firstMatch.id, doctrineFittingId: 0 });
-                                }
-                              }}
-                              className="h-8 text-xs"
-                            />
-                            <select
-                              value={effectiveDocId}
-                              onChange={(e) =>
-                                updateCond(idx, { doctrineId: Number(e.target.value), doctrineFittingId: 0 })
-                              }
-                              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                            >
-                              {filteredDocs.map((d) => (
-                                <option key={d.id} value={d.id}>
-                                  {d.name} ({d.fittings.length} fits)
-                                </option>
-                              ))}
-                              {!filteredDocs.length && <option value={0}>No doctrines match</option>}
-                            </select>
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-xs text-muted-foreground">Doctrine scope (All or specific fit)</label>
-                            <select
-                              value={cond.doctrineFittingId}
-                              onChange={(e) => updateCond(idx, { doctrineFittingId: Number(e.target.value) })}
-                              className="mt-9 h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                            >
-                              <option value={0}>All required fittings (%)</option>
-                              {docFittings.map((df) => (
-                                <option key={df.id} value={df.id}>
-                                  {df.ship_type_name} — {df.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-                        {cond.doctrineFittingId > 0 ? (
-                          <div className="space-y-1">
-                            <label className="text-xs text-muted-foreground">Skill target</label>
-                            <select
-                              value={cond.fittingLevel}
-                              onChange={(e) =>
-                                updateCond(idx, { fittingLevel: e.target.value as "minimum" | "recommended" })
-                              }
-                              className="h-9 w-48 rounded-md border border-input bg-background px-3 text-sm"
-                            >
-                              <option value="minimum">Minimum</option>
-                              <option value="recommended">Recommended</option>
-                            </select>
-                          </div>
-                        ) : (
-                          <div className="space-y-1">
-                            <label className="text-xs text-muted-foreground">Required coverage (%)</label>
-                            <Input
-                              type="number"
-                              min={1}
-                              max={100}
-                              value={cond.minPct}
-                              onChange={(e) => updateCond(idx, { minPct: Number(e.target.value) })}
-                              className="w-32"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {cond.type === "skill" && (
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      <div className="space-y-1 sm:col-span-2">
-                        <label className="text-xs text-muted-foreground">Skill</label>
-                        <Input
-                          placeholder="Search skill by name or ID..."
-                          value={skillQuery}
-                          onChange={(e) => setSkillQuery(e.target.value)}
-                          className="h-8 text-xs"
-                        />
-                        <select
-                          value={cond.skillId}
-                          onChange={(e) => updateCond(idx, { skillId: Number(e.target.value) })}
-                          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                        >
-                          {!skillOptions.some((s) => s.id === cond.skillId) && cond.skillId > 0 && (
-                            <option value={cond.skillId}>Skill #{cond.skillId}</option>
-                          )}
-                          {skillOptions.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.name} ({s.id})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Minimum level (1–5)</label>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={5}
-                          value={cond.minSkillLevel}
-                          onChange={(e) => updateCond(idx, { minSkillLevel: Number(e.target.value) })}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {cond.type === "total_sp" && (
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Minimum Total Skillpoints</label>
-                      <Input
-                        type="number"
-                        min={0}
-                        step={1000000}
-                        value={cond.minSp}
-                        onChange={(e) => updateCond(idx, { minSp: Number(e.target.value) })}
-                      />
-                    </div>
-                  )}
-
-                  {cond.type === "ship_owned" && (
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Ship Type ID</label>
-                        <Input
-                          type="number"
-                          value={cond.shipTypeId}
-                          onChange={(e) => updateCond(idx, { shipTypeId: Number(e.target.value) })}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Minimum hulls owned</label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={cond.minCount}
-                          onChange={(e) => updateCond(idx, { minCount: Number(e.target.value) })}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {cond.type === "implant" && (
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Implant name (contains)</label>
-                      <Input
-                        placeholder="e.g. High-grade Amulet"
-                        value={cond.implantName}
-                        onChange={(e) => updateCond(idx, { implantName: e.target.value })}
-                      />
-                    </div>
-                  )}
-
-                  {cond.type === "other_group" && (
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Required Auth group</label>
-                      <select
-                        value={cond.otherGroupId}
-                        onChange={(e) => updateCond(idx, { otherGroupId: Number(e.target.value) })}
-                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                      >
-                        {groups.map((g) => (
-                          <option key={g.id} value={g.id}>
-                            {g.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {cond.type === "fleet_participation" && (
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Lookback window (days)</label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={cond.days}
-                          onChange={(e) => updateCond(idx, { days: Number(e.target.value) })}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Minimum FATs</label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={cond.minFats}
-                          onChange={(e) => updateCond(idx, { minFats: Number(e.target.value) })}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
+              {conditions.map((cond) => (
+                <ConditionEditor
+                  key={cond.uid}
+                  cond={cond}
+                  canRemove={conditions.length > 1}
+                  doctrines={doctrines}
+                  fittings={fittings}
+                  groups={groups}
+                  onChange={(patch) => updateCond(cond.uid, patch)}
+                  onRemove={() => setConditions((prev) => prev.filter((item) => item.uid !== cond.uid))}
+                />
               ))}
             </div>
 
