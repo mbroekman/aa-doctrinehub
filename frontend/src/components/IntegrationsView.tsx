@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Send, ShieldCheck } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import type { Doctrine, FittingSummary, HangarShipMatch, IndustryOrderResult, SrpCompareResult } from "@/types";
+
+type HangarSortKey = "ship" | "doctrine" | "location" | "match";
 
 export function IntegrationsView({
   doctrines,
@@ -19,6 +21,9 @@ export function IntegrationsView({
   const [loadingHangars, setLoadingHangars] = useState(false);
   const [hangarDoctrineId, setHangarDoctrineId] = useState<number>(0);
   const [hangarCharacter, setHangarCharacter] = useState<string>("all");
+  const [hangarMatchFilter, setHangarMatchFilter] = useState<"all" | "full" | "incomplete">("all");
+  const [sortKey, setSortKey] = useState<HangarSortKey>("ship");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selectedDoctrineId, setSelectedDoctrineId] = useState<number>(doctrines[0]?.id ?? 0);
   const [industryResult, setIndustryResult] = useState<IndustryOrderResult | null>(null);
   const [srpFittingId, setSrpFittingId] = useState<number>(fittings[0]?.id ?? 0);
@@ -38,6 +43,24 @@ export function IntegrationsView({
 
   useEffect(loadHangars, [loadHangars]);
 
+  const toggleSort = (key: HangarSortKey) => {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "match" ? "desc" : "asc");
+    }
+  };
+
+  const renderSortIcon = (key: HangarSortKey) => {
+    if (sortKey !== key) return <ArrowUpDown className="ml-1 inline h-3 w-3 opacity-50" />;
+    return sortDir === "asc" ? (
+      <ArrowUp className="ml-1 inline h-3 w-3" />
+    ) : (
+      <ArrowDown className="ml-1 inline h-3 w-3" />
+    );
+  };
+
   const characterNames = useMemo(
     () => Array.from(new Set(ships.map((s) => s.character_name))).sort((a, b) => a.localeCompare(b)),
     [ships],
@@ -47,12 +70,25 @@ export function IntegrationsView({
     const groups = new Map<string, HangarShipMatch[]>();
     for (const ship of ships) {
       if (hangarCharacter !== "all" && ship.character_name !== hangarCharacter) continue;
+      if (hangarMatchFilter === "full" && ship.match_pct < 100) continue;
+      if (hangarMatchFilter === "incomplete" && ship.match_pct === 100) continue;
       const list = groups.get(ship.character_name) ?? [];
       list.push(ship);
       groups.set(ship.character_name, list);
     }
+    const factor = sortDir === "asc" ? 1 : -1;
+    for (const list of groups.values()) {
+      list.sort((a, b) => {
+        if (sortKey === "match") return (a.match_pct - b.match_pct) * factor;
+        if (sortKey === "location") return a.location_name.localeCompare(b.location_name) * factor;
+        if (sortKey === "doctrine") {
+          return (a.doctrine_names[0] || "").localeCompare(b.doctrine_names[0] || "") * factor;
+        }
+        return `${a.ship_type_name} ${a.fitting_name}`.localeCompare(`${b.ship_type_name} ${b.fitting_name}`) * factor;
+      });
+    }
     return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [ships, hangarCharacter]);
+  }, [ships, hangarCharacter, hangarMatchFilter, sortKey, sortDir]);
 
   const handleIndustryPush = async () => {
     if (!selectedDoctrineId) return;
@@ -82,7 +118,7 @@ export function IntegrationsView({
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       <Card>
-        <CardHeader className="flex flex-wrap flex-row items-center justify-between gap-2">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-base">Hangar Check (Fitted Doctrine Ships)</CardTitle>
           <div className="flex flex-wrap items-center gap-2">
             <select
@@ -111,6 +147,16 @@ export function IntegrationsView({
                 </option>
               ))}
             </select>
+            <select
+              aria-label="Filter hangar check by match status"
+              value={hangarMatchFilter}
+              onChange={(e) => setHangarMatchFilter(e.target.value as "all" | "full" | "incomplete")}
+              className="h-8 rounded-md border border-input bg-background px-2.5 text-xs"
+            >
+              <option value="all">All (100% &amp; partial)</option>
+              <option value="full">Only 100% (Full)</option>
+              <option value="incomplete">Not 100% (Incomplete)</option>
+            </select>
             <Button size="sm" variant="outline" onClick={loadHangars} disabled={loadingHangars}>
               <RefreshCw className={`mr-1 h-3.5 w-3.5 ${loadingHangars ? "animate-spin" : ""}`} />
               Refresh
@@ -125,22 +171,53 @@ export function IntegrationsView({
                   <span className="text-sm font-semibold">{charName}</span>
                   <Badge variant="secondary">{charShips.length} ship(s)</Badge>
                 </div>
-                <ul className="space-y-1.5 text-sm">
-                  {charShips.map((s) => (
-                    <li
-                      key={`${s.character_id}-${s.item_id}-${s.fitting_id}`}
-                      className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-1.5 first:border-t-0 first:pt-0"
-                    >
-                      <span>
-                        {s.ship_type_name} ({s.fitting_name}) ·{" "}
-                        <span className="text-xs text-muted-foreground">Location {s.location_id}</span>
-                      </span>
-                      <Badge variant={s.match_status === "full" ? "default" : "secondary"}>
-                        {s.match_status} ({s.match_pct}%)
-                      </Badge>
-                    </li>
-                  ))}
-                </ul>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-xs uppercase text-muted-foreground">
+                        <th className="py-1.5 pr-3">
+                          <button type="button" onClick={() => toggleSort("ship")} className="font-semibold hover:text-foreground">
+                            Ship {renderSortIcon("ship")}
+                          </button>
+                        </th>
+                        <th className="py-1.5 pr-3">
+                          <button type="button" onClick={() => toggleSort("doctrine")} className="font-semibold hover:text-foreground">
+                            Doctrine {renderSortIcon("doctrine")}
+                          </button>
+                        </th>
+                        <th className="py-1.5 pr-3">
+                          <button type="button" onClick={() => toggleSort("location")} className="font-semibold hover:text-foreground">
+                            Location {renderSortIcon("location")}
+                          </button>
+                        </th>
+                        <th className="py-1.5 text-right">
+                          <button type="button" onClick={() => toggleSort("match")} className="font-semibold hover:text-foreground">
+                            100% / Fit {renderSortIcon("match")}
+                          </button>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {charShips.map((s) => (
+                        <tr key={`${s.character_id}-${s.item_id}-${s.fitting_id}`} className="border-b border-border/50 last:border-b-0">
+                          <td className="py-1.5 pr-3">
+                            <span className="font-medium">{s.ship_type_name}</span>{" "}
+                            <span className="text-muted-foreground">({s.fitting_name})</span>
+                          </td>
+                          <td className="py-1.5 pr-3 text-xs text-muted-foreground">
+                            {s.doctrine_names.length ? s.doctrine_names.join(", ") : "—"}
+                          </td>
+                          <td className="py-1.5 pr-3 text-xs text-muted-foreground">{s.location_name}</td>
+                          <td className="py-1.5 text-right">
+                            <Badge variant={s.match_pct === 100 ? "default" : "secondary"}>
+                              {s.match_pct === 100 ? "100% Full" : `${s.match_pct}% (${s.match_status})`}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ))
           ) : (

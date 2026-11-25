@@ -7,12 +7,14 @@ from collections import Counter
 from datetime import timedelta
 from typing import Any
 
+import requests
 from allianceauth.authentication.models import CharacterOwnership
 from django.apps import apps
 from django.contrib.auth.models import User
 from django.utils import timezone
 
 from ..models import CharacterAsset, Doctrine, Fitting, FittingVersion
+from .esi_sync import ESI_BASE_URL, ESI_TIMEOUT, get_valid_token
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +34,66 @@ def _is_fitted_asset_flag(flag: str) -> bool:
     return any(flag.startswith(prefix) for prefix in FITTED_FLAG_PREFIXES)
 
 
+def _resolve_location_names(location_ids: set[int], character_ids: list[int]) -> dict[int, str]:
+    """Resolve station and structure IDs to human-readable names."""
+    if not location_ids:
+        return {}
+    names: dict[int, str] = {}
+
+    try:
+        from eveuniverse.models import EveStation
+
+        for sid, name in EveStation.objects.filter(id__in=location_ids).values_list("id", "name"):
+            names[int(sid)] = str(name)
+    except ImportError:
+        pass
+
+    access_token: str | None = None
+    for cid in character_ids:
+        tok = get_valid_token(cid)
+        if tok is not None:
+            try:
+                access_token = tok.valid_access_token()
+                break
+            except Exception:  # noqa: BLE001
+                continue
+
+    for loc_id in location_ids:
+        if loc_id in names:
+            continue
+        if 60000000 <= loc_id < 64000000:
+            try:
+                resp = requests.get(f"{ESI_BASE_URL}/universe/stations/{loc_id}/", timeout=ESI_TIMEOUT)
+                if resp.ok:
+                    names[loc_id] = str(resp.json().get("name") or f"Station {loc_id}")
+                    continue
+            except requests.RequestException:
+                pass
+            names[loc_id] = f"Station {loc_id}"
+        elif loc_id >= 1000000000000 and access_token:
+            try:
+                resp = requests.get(
+                    f"{ESI_BASE_URL}/universe/structures/{loc_id}/",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    timeout=ESI_TIMEOUT,
+                )
+                if resp.ok:
+                    names[loc_id] = str(resp.json().get("name") or f"Structure {loc_id}")
+                    continue
+            except requests.RequestException:
+                pass
+            names[loc_id] = f"Structure {loc_id}"
+        else:
+            names[loc_id] = f"Location {loc_id}"
+    return names
+
+
 def hangar_check_for_user(user: User, doctrine_id: int | None = None) -> list[dict[str, Any]]:
     """Check which fitted doctrine ships ``user`` owns per character and location."""
-    fittings_qs = Fitting.objects.exclude(ship_type_id__isnull=True).prefetch_related("versions__items")
+    fittings_qs = Fitting.objects.exclude(ship_type_id__isnull=True).prefetch_related(
+        "versions__items",
+        "doctrines",
+    )
     if doctrine_id:
         fittings_qs = fittings_qs.filter(doctrines__id=doctrine_id).distinct()
     fittings_by_ship: dict[int, list[Fitting]] = {}
@@ -44,13 +103,17 @@ def hangar_check_for_user(user: User, doctrine_id: int | None = None) -> list[di
 
     ownerships = CharacterOwnership.objects.filter(user=user).select_related("character")
     results: list[dict[str, Any]] = []
+    location_ids: set[int] = set()
+    character_ids: list[int] = []
 
     for co in ownerships:
         char = co.character
+        character_ids.append(char.character_id)
         assets = list(CharacterAsset.objects.filter(character=char))
         if not assets:
             continue
 
+        by_item_id = {a.item_id: a for a in assets}
         children_by_ship: dict[int, list[CharacterAsset]] = {}
         for asset in assets:
             if _is_fitted_asset_flag(asset.location_flag):
@@ -59,6 +122,13 @@ def hangar_check_for_user(user: User, doctrine_id: int | None = None) -> list[di
         for asset in assets:
             if not asset.is_singleton or asset.type_id not in fittings_by_ship:
                 continue
+            root_loc = asset.location_id
+            seen: set[int] = set()
+            while root_loc in by_item_id and root_loc not in seen:
+                seen.add(root_loc)
+                root_loc = by_item_id[root_loc].location_id
+            location_ids.add(root_loc)
+
             fitted_modules = Counter(
                 mod.type_name.lower() for mod in children_by_ship.get(asset.item_id, []) if mod.type_name
             )
@@ -75,15 +145,18 @@ def hangar_check_for_user(user: User, doctrine_id: int | None = None) -> list[di
                 matched_count = sum(min(fitted_modules[k], cnt) for k, cnt in expected.items())
                 pct = round((matched_count / total_expected) * 100) if total_expected else 100
                 status = "full" if pct == 100 else ("partial" if matched_count > 0 else "hull_only")
+                doc_names = sorted(d.name for d in fitting.doctrines.all())
                 candidate = {
                     "character_id": char.character_id,
                     "character_name": char.character_name,
                     "item_id": asset.item_id,
-                    "location_id": asset.location_id,
+                    "location_id": root_loc,
+                    "location_name": "",
                     "ship_type_id": asset.type_id,
                     "ship_type_name": fitting.ship_type_name,
                     "fitting_id": fitting.pk,
                     "fitting_name": fitting.name,
+                    "doctrine_names": doc_names,
                     "match_status": status,
                     "match_pct": pct,
                 }
@@ -91,6 +164,10 @@ def hangar_check_for_user(user: User, doctrine_id: int | None = None) -> list[di
                     best_match = candidate
             if best_match:
                 results.append(best_match)
+
+    loc_names = _resolve_location_names(location_ids, character_ids)
+    for row in results:
+        row["location_name"] = loc_names.get(row["location_id"], f"Location {row['location_id']}")
     return results
 
 

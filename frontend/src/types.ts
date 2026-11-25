@@ -266,10 +266,12 @@ export interface HangarShipMatch {
   character_name: string;
   item_id: number;
   location_id: number;
+  location_name: string;
   ship_type_id: number;
   ship_type_name: string;
   fitting_id: number;
   fitting_name: string;
+  doctrine_names: string[];
   match_status: "full" | "partial" | "hull_only";
   match_pct: number;
 }
