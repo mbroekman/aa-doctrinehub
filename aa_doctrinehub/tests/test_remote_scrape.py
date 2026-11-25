@@ -234,18 +234,19 @@ def test_batched_scrape_skips_existing_and_preserves_earlier_batches():
 
     with patch("requests.Session.get", new=_fake_get_factory(pages)):
         snap1 = scrape_remote_fittings_site(base, "abc", limit=1, skip_existing=True, request_delay=0)
-    assert len(snap1.fittings) == 1
-    assert snap1.fittings[0].external_id == 101
+    # Batch 1 fetches doctrine 11 + its required fit 101 + up to limit=1 standalone fit (102)
+    assert len(snap1.doctrines) == 1
+    assert {f.external_id for f in snap1.fittings} == {101, 102}
     res1 = import_remote_scrape(snap1, prune_missing=False)
-    assert res1.fittings_created == 1
+    assert res1.doctrines_created == 1
+    assert res1.fittings_created == 2
+    doc = Doctrine.objects.get(source=Source.REMOTE_AUTH, external_id=11)
+    assert doc.doctrine_fittings.count() == 1
 
     with patch("requests.Session.get", new=_fake_get_factory(pages)):
         snap2 = scrape_remote_fittings_site(base, "abc", limit=1, skip_existing=True, request_delay=0)
-    assert len(snap2.fittings) == 1
-    assert snap2.fittings[0].external_id == 102
-    res2 = import_remote_scrape(snap2, prune_missing=False)
-    assert res2.fittings_created == 1
-    assert res2.fittings_removed == 0
+    assert len(snap2.doctrines) == 0
+    assert len(snap2.fittings) == 0
     assert Fitting.objects.from_source(Source.REMOTE_AUTH).count() == 2
 
 

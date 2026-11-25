@@ -312,6 +312,8 @@ def scrape_remote_fittings_site(
         doc_items = doc_items[:limit]
 
     snapshot = SourceSnapshot()
+    doctrine_fit_ids: list[int] = []
+    seen_doc_fit_ids: set[int] = set()
     for doctrine_id, d_name in doc_items:
         if request_delay > 0:
             time.sleep(request_delay)
@@ -319,12 +321,24 @@ def scrape_remote_fittings_site(
         snapshot.doctrines.append(doctrine)
         for fid in doctrine.fitting_ids:
             fit_links.setdefault(fid, f"Fit {fid}")
+            if fid not in seen_doc_fit_ids:
+                seen_doc_fit_ids.add(fid)
+                doctrine_fit_ids.append(fid)
 
-    fit_items = [(fid, name) for fid, name in fit_links.items() if fid not in existing_fit_ids]
+    required_fit_items = [
+        (fid, fit_links.get(fid, f"Fit {fid}"))
+        for fid in doctrine_fit_ids
+        if fid not in existing_fit_ids
+    ]
+    standalone_fit_items = [
+        (fid, name)
+        for fid, name in fit_links.items()
+        if fid not in seen_doc_fit_ids and fid not in existing_fit_ids
+    ]
     if limit is not None and limit > 0:
-        fit_items = fit_items[:limit]
+        standalone_fit_items = standalone_fit_items[:limit]
 
-    for fit_id, f_name in fit_items:
+    for fit_id, f_name in [*required_fit_items, *standalone_fit_items]:
         if request_delay > 0:
             time.sleep(request_delay)
         fitting = _scrape_fitting(session, normalized, fit_id, f_name, timeout=timeout)
