@@ -39,11 +39,13 @@ UNKNOWN = RuleEvaluation.Status.UNKNOWN
 
 def _user_snapshots(user: User) -> list[CharacterSkillSnapshot]:
     snaps: list[CharacterSkillSnapshot] = []
-    ownerships = CharacterOwnership.objects.filter(user=user).select_related(
-        "character", "character__doctrinehub_skill_snapshot"
-    ).prefetch_related(
-        "character__doctrinehub_skill_snapshot__skills",
-        "character__doctrinehub_skill_snapshot__implants",
+    ownerships = (
+        CharacterOwnership.objects.filter(user=user)
+        .select_related("character", "character__doctrinehub_skill_snapshot")
+        .prefetch_related(
+            "character__doctrinehub_skill_snapshot__skills",
+            "character__doctrinehub_skill_snapshot__implants",
+        )
     )
     for co in ownerships:
         snap = getattr(co.character, "doctrinehub_skill_snapshot", None)
@@ -279,9 +281,7 @@ def _eval_leaf(
             return UNKNOWN, "No synced implant snapshot"
         for snap in snapshots:
             for imp in snap.implants.all():
-                if (target_id and imp.type_id == target_id) or (
-                    target_name and target_name in imp.type_name.lower()
-                ):
+                if (target_id and imp.type_id == target_id) or (target_name and target_name in imp.type_name.lower()):
                     return PASS, f"Implant present: {imp.type_name or imp.type_id}"
         return FAIL, "Required implant not found"
 

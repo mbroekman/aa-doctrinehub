@@ -320,7 +320,7 @@ export function IntegrationsView({
               value={killmailJson}
               onChange={(e) => setKillmailJson(e.target.value)}
               placeholder='Paste ESI killmail JSON ({"victim": {"ship_type_id": ..., "items": [...]}})'
-              className="w-full rounded-md border border-input bg-background p-2 font-mono text-xs"
+              className="w-full rounded-md border border-input bg-background p-2 font-mono text-xs text-foreground placeholder:text-muted-foreground"
             />
             <Button size="sm" onClick={handleSrpCompare} disabled={!srpFittingId || !killmailJson.trim()}>
               <ShieldCheck className="mr-1 h-3.5 w-3.5" />

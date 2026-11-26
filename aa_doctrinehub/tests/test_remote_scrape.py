@@ -153,11 +153,7 @@ def test_scrape_remote_site_collects_doctrines_fittings_and_categories():
 
 def test_scrape_rejects_expired_session_redirect():
     base = "https://other.example"
-    pages = {
-        f"{base}/fittings/fit/all/": _FakeResp(
-            "login", url=f"{base}/account/login/?next=/fittings/fit/all/"
-        )
-    }
+    pages = {f"{base}/fittings/fit/all/": _FakeResp("login", url=f"{base}/account/login/?next=/fittings/fit/all/")}
     with patch("requests.Session.get", new=_fake_get_factory(pages)):
         with pytest.raises(RemoteScrapeError, match="expired"):
             scrape_remote_fittings_site(base, "expired", request_delay=0)

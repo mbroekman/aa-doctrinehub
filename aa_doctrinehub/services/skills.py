@@ -60,14 +60,8 @@ def _eveuniverse_dogma_lookup(type_ids: set[int]) -> dict[int, list[tuple[int, s
                 raw_reqs[tid].append((sid, max(1, min(5, lvl))))
                 skill_ids.add(sid)
 
-    names = {
-        int(tid): str(name)
-        for tid, name in EveType.objects.filter(id__in=skill_ids).values_list("id", "name")
-    }
-    return {
-        tid: [(sid, names.get(sid, f"Skill {sid}"), lvl) for sid, lvl in reqs]
-        for tid, reqs in raw_reqs.items()
-    }
+    names = {int(tid): str(name) for tid, name in EveType.objects.filter(id__in=skill_ids).values_list("id", "name")}
+    return {tid: [(sid, names.get(sid, f"Skill {sid}"), lvl) for sid, lvl in reqs] for tid, reqs in raw_reqs.items()}
 
 
 @transaction.atomic

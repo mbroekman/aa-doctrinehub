@@ -336,15 +336,18 @@ def remote_scrape(request: HttpRequest) -> HttpResponse | StreamingHttpResponse:
                     snapshot = payload
 
             assert snapshot is not None
-            yield json.dumps(
-                {
-                    "type": "log",
-                    "message": (
-                        f"Saving {len(snapshot.doctrines)} doctrines, {len(snapshot.fittings)} fittings, "
-                        f"and {len(snapshot.categories)} categories..."
-                    ),
-                }
-            ) + "\n"
+            yield (
+                json.dumps(
+                    {
+                        "type": "log",
+                        "message": (
+                            f"Saving {len(snapshot.doctrines)} doctrines, {len(snapshot.fittings)} fittings, "
+                            f"and {len(snapshot.categories)} categories..."
+                        ),
+                    }
+                )
+                + "\n"
+            )
             prune_missing = limit is None and offset == 0 and not skip_existing
             result = import_remote_scrape(snapshot, prune_missing=prune_missing)
             yield json.dumps({"type": "log", "message": f"Done: {result.summary()}"}) + "\n"
@@ -521,9 +524,11 @@ def fitting_skill_plan(request: HttpRequest, fitting_id: int) -> JsonResponse:
     char_id = request.GET.get("character_id")
     snapshot = None
     if char_id:
-        co = CharacterOwnership.objects.filter(
-            user=_user(request), character__character_id=int(char_id)
-        ).select_related("character__doctrinehub_skill_snapshot").first()
+        co = (
+            CharacterOwnership.objects.filter(user=_user(request), character__character_id=int(char_id))
+            .select_related("character__doctrinehub_skill_snapshot")
+            .first()
+        )
         if co:
             snapshot = getattr(co.character, "doctrinehub_skill_snapshot", None)
     plan = export_skill_plan(version, snapshot=snapshot, target=target)

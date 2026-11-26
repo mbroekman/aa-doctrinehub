@@ -308,9 +308,7 @@ class CharacterSkill(models.Model):
         verbose_name = _("Character skill")
         verbose_name_plural = _("Character skills")
         ordering = ["skill_name", "skill_id"]
-        constraints = [
-            models.UniqueConstraint(fields=["snapshot", "skill_id"], name="doctrinehub_charskill_unique")
-        ]
+        constraints = [models.UniqueConstraint(fields=["snapshot", "skill_id"], name="doctrinehub_charskill_unique")]
 
     def __str__(self) -> str:
         return f"{self.skill_name or self.skill_id} {self.active_skill_level}"
@@ -350,9 +348,7 @@ class CharacterAsset(models.Model):
     class Meta:
         verbose_name = _("Character asset")
         verbose_name_plural = _("Character assets")
-        constraints = [
-            models.UniqueConstraint(fields=["character", "item_id"], name="doctrinehub_charasset_unique")
-        ]
+        constraints = [models.UniqueConstraint(fields=["character", "item_id"], name="doctrinehub_charasset_unique")]
 
     def __str__(self) -> str:
         return f"{self.type_name or self.type_id} x{self.quantity}"
@@ -380,9 +376,7 @@ class FittingSkillRequirement(models.Model):
         verbose_name = _("Fitting skill requirement")
         verbose_name_plural = _("Fitting skill requirements")
         ordering = ["skill_name", "skill_id"]
-        constraints = [
-            models.UniqueConstraint(fields=["version", "skill_id"], name="doctrinehub_fitskillreq_unique")
-        ]
+        constraints = [models.UniqueConstraint(fields=["version", "skill_id"], name="doctrinehub_fitskillreq_unique")]
 
     def __str__(self) -> str:
         return f"{self.skill_name} {self.required_level} (rec {self.recommended_level})"
@@ -455,9 +449,7 @@ class RuleEvaluation(models.Model):
     class Meta:
         verbose_name = _("Rule evaluation")
         verbose_name_plural = _("Rule evaluations")
-        constraints = [
-            models.UniqueConstraint(fields=["rule", "user"], name="doctrinehub_ruleeval_unique")
-        ]
+        constraints = [models.UniqueConstraint(fields=["rule", "user"], name="doctrinehub_ruleeval_unique")]
 
     def __str__(self) -> str:
         return f"{self.rule.name}: {self.user.username} = {self.status}"

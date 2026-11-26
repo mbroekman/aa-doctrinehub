@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Dark theme form controls (TASK-17):** Dropdowns (`<select>`) and the SRP killmail textarea now use the theme text colour instead of the browser/Bootstrap default, which was dark grey on a dark background. `color-scheme` now follows the active theme so native dropdown lists and checkboxes match.
 - **External Auth scraper (TASK-10, TASK-12):** Ignored generic `"Doctrine Information"` card headings so the real doctrine name from the index is preserved, restricted doctrine icon extraction to `images.evetech.net/types/` (never character portraits), resolved `ship_type_id` via `EveType` (matching `ship_type_name`) or `/render` ship images instead of picking module icons from the fitting page, and ensured batched scrapes always fetch all missing fittings required by the doctrines in the current batch.
 
 ### Added
