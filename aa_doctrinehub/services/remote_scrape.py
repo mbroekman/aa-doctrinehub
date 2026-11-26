@@ -19,7 +19,8 @@ from bs4 import BeautifulSoup
 from django.db import transaction
 
 from ..models import Category, Doctrine, Fitting, Source
-from .eft import EftParseError, parse_eft
+from .eft import EftParseError
+from .fittings import parse_eft_with_bays
 from .fittings_sync import (
     SourceCategory,
     SourceDoctrine,
@@ -207,7 +208,7 @@ def _scrape_fitting(
         return None
 
     try:
-        parsed = parse_eft(eft_text)
+        parsed = parse_eft_with_bays(eft_text)
         name = parsed.name or fallback_name or f"Fit {fit_id}"
         ship_type_name = parsed.ship_type_name
         items = [

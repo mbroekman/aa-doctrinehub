@@ -7,7 +7,9 @@ from django.core.management import call_command
 
 from aa_doctrinehub.models import CharacterSkill, CharacterSkillSnapshot, FittingItem
 from aa_doctrinehub.services import types
-from aa_doctrinehub.services.fittings import import_eft, refresh_incomplete_fittings, update_from_eft
+from aa_doctrinehub.services.eft import BAY_FLAGS
+from aa_doctrinehub.services.fittings import import_eft, refresh_incomplete_fittings, update_from_eft, version_eft
+from aa_doctrinehub.services.types import CATEGORY_DRONE, CATEGORY_FIGHTER
 from aa_doctrinehub.services.skills import evaluate_fitting_for_snapshot, evaluate_fitting_for_user
 
 pytestmark = pytest.mark.django_db
@@ -88,3 +90,49 @@ def test_backfill_command_fixes_existing_fitting(fake_esi, monkeypatch):
     fitting.refresh_from_db()
     assert fitting.ship_type_id == HEL
     assert fitting.current_version.skill_requirements.filter(skill_id=MINMATAR_CARRIER).exists()
+
+
+TITAN_EFT = "[Ragnarok, Titan]\n\nDamage Control II\n\nStrontium Clathrates x5000\nHobgoblin II x5"
+CATEGORIES = {2048: 7, 16275: 4, 2456: CATEGORY_DRONE, 23055: CATEGORY_FIGHTER}
+TITAN_IDS = {"Ragnarok": 23773, "Damage Control II": 2048, "Strontium Clathrates": 16275, "Hobgoblin II": 2456}
+
+
+@pytest.fixture
+def fake_categories(monkeypatch):
+    ids = {**IDS, **TITAN_IDS}
+    monkeypatch.setattr(types, "_esi_ids", lambda names: {n: ids[n] for n in names if n in ids})
+    monkeypatch.setattr(types, "_esi_category", lambda tid: CATEGORIES.get(tid))
+
+
+def _bays(fitting):
+    return {i.type_name: i.flag for i in fitting.current_version.items.all() if i.flag in BAY_FLAGS}
+
+
+def test_cargo_only_block_is_not_drones(fake_categories):
+    fitting = import_eft("[Ragnarok, Titan]\n\nDamage Control II\n\nStrontium Clathrates x5000")
+    assert _bays(fitting) == {"Strontium Clathrates": "Cargo"}
+
+
+def test_mixed_bay_block_is_split_by_type(fake_categories):
+    fitting = import_eft(TITAN_EFT)
+    assert _bays(fitting) == {"Strontium Clathrates": "Cargo", "Hobgoblin II": "DroneBay"}
+
+
+def test_fighters_go_to_fighter_bay(fake_categories):
+    fitting = import_eft(EFT)
+    assert _bays(fitting) == {"Templar I": "FighterBay"}
+    assert "Templar I x10" in version_eft(fitting.current_version)
+
+
+def test_unknown_types_keep_positional_guess():
+    fitting = import_eft("[Ragnarok, Titan]\n\nDamage Control II\n\nStrontium Clathrates x5000")
+    assert _bays(fitting) == {"Strontium Clathrates": "DroneBay"}
+
+
+def test_refresh_fixes_bays_of_existing_local_fitting(fake_categories, monkeypatch):
+    monkeypatch.setattr(types, "_esi_ids", lambda names: {})
+    fitting = import_eft("[Ragnarok, Titan]\n\nDamage Control II\n\nStrontium Clathrates x5000")
+    assert _bays(fitting) == {"Strontium Clathrates": "DroneBay"}
+    monkeypatch.setattr(types, "_esi_ids", lambda names: {n: TITAN_IDS[n] for n in names if n in TITAN_IDS})
+    call_command("doctrinehub_refresh_requirements", "--all")
+    assert _bays(fitting) == {"Strontium Clathrates": "Cargo"}

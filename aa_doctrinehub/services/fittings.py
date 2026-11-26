@@ -6,9 +6,9 @@ from django.contrib.auth.models import User
 from django.db import transaction
 
 from ..models import Fitting, FittingItem, FittingVersion, Source
-from .eft import ExportItem, ParsedFitting, parse_eft, to_eft, to_multibuy
+from .eft import BAY_FLAGS, ExportItem, ParsedFitting, classify_bays, parse_eft, to_eft, to_multibuy
 from .skills import extract_dogma_skills_for_version
-from .types import resolve_type_ids
+from .types import bay_flag_for, bay_flags_by_name, resolve_type_ids, type_categories
 
 
 class ReadOnlyFittingError(PermissionError):
@@ -69,6 +69,25 @@ def add_version(
     return version
 
 
+def parse_eft_with_bays(eft: str) -> ParsedFitting:
+    """Parse EFT and put drones, fighters and cargo in the right bay by item type."""
+    return classify_bays(parse_eft(eft), bay_flags_by_name)
+
+
+def fix_bay_flags(version: FittingVersion) -> int:
+    """Move bay items of an EFT-based version to the bay their type belongs in."""
+    items = [i for i in version.items.all() if i.flag in BAY_FLAGS and i.type_id]
+    categories = type_categories({int(i.type_id) for i in items if i.type_id})
+    changed = 0
+    for item in items:
+        flag = bay_flag_for(categories.get(int(item.type_id or 0)), item.flag)
+        if flag != item.flag:
+            item.flag = flag
+            item.save(update_fields=["flag"])
+            changed += 1
+    return changed
+
+
 def resolve_fitting_types(fitting: Fitting, version: FittingVersion | None = None) -> None:
     """Fill in missing type IDs of the hull and of the items of ``version``."""
     version = version or fitting.current_version
@@ -92,6 +111,8 @@ def refresh_requirements(fitting: Fitting, version: FittingVersion | None = None
     if version is None:
         return
     resolve_fitting_types(fitting, version)
+    if fitting.source == Source.LOCAL:
+        fix_bay_flags(version)
     fitting.refresh_from_db(fields=["ship_type_id"])
     version.fitting = fitting
     extract_dogma_skills_for_version(version)
@@ -114,7 +135,7 @@ def refresh_incomplete_fittings() -> int:
 @transaction.atomic
 def import_eft(eft: str, user: User | None = None, description: str = "") -> Fitting:
     """Create a new local fitting from EFT text."""
-    parsed = parse_eft(eft)
+    parsed = parse_eft_with_bays(eft)
     fitting = Fitting.objects.create(
         name=parsed.name,
         ship_type_name=parsed.ship_type_name,
@@ -130,7 +151,7 @@ def update_from_eft(fitting: Fitting, eft: str, user: User | None = None, change
     """Store a new version of a local fitting from EFT text."""
     if not fitting.is_editable:
         raise ReadOnlyFittingError(f"Fitting {fitting.pk} is synced from {fitting.source}")
-    parsed = parse_eft(eft)
+    parsed = parse_eft_with_bays(eft)
     if fitting.ship_type_name != parsed.ship_type_name:
         fitting.ship_type_id = None
     fitting.name = parsed.name

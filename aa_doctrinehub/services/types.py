@@ -149,3 +149,76 @@ def dogma_lookup(type_ids: set[int]) -> dict[int, list[tuple[int, str, int]]]:
     return {
         tid: [(sid, names.get(sid, f"Skill {sid}"), lvl) for sid, lvl in reqs] for tid, reqs in by_type.items() if reqs
     }
+
+
+CATEGORY_DRONE = 18
+CATEGORY_FIGHTER = 87
+
+
+def _eveuniverse_categories(type_ids: set[int]) -> dict[int, int]:
+    try:
+        from eveuniverse.models import EveType
+    except ImportError:
+        return {}
+    rows = EveType.objects.filter(id__in=type_ids).values_list("id", "eve_group__eve_category_id")
+    return {int(tid): int(cat) for tid, cat in rows if cat}
+
+
+def _esi_json(path: str) -> Any:
+    key = f"aa_doctrinehub:esi:{path}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    try:
+        resp = requests.get(f"{ESI_BASE_URL}{path}", timeout=ESI_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError):
+        logger.warning("ESI request %s failed", path)
+        return None
+    cache.set(key, data, _CACHE_TTL)
+    return data
+
+
+def _esi_category(type_id: int) -> int | None:
+    type_data = _esi_json(f"/universe/types/{type_id}/")
+    group_id = type_data.get("group_id") if isinstance(type_data, dict) else None
+    if not group_id:
+        return None
+    group_data = _esi_json(f"/universe/groups/{int(group_id)}/")
+    category_id = group_data.get("category_id") if isinstance(group_data, dict) else None
+    return int(category_id) if category_id else None
+
+
+def type_categories(type_ids: set[int]) -> dict[int, int]:
+    """EVE category ID per type. Types whose category is unknown are left out."""
+    if not type_ids:
+        return {}
+    found = _eveuniverse_categories(type_ids)
+    for tid in sorted(type_ids - found.keys()):
+        category = _esi_category(tid)
+        if category:
+            found[tid] = category
+    return found
+
+
+def bay_flag_for(category_id: int | None, current: str) -> str:
+    """The bay an item belongs in, by its category. Unknown categories keep ``current``."""
+    if category_id is None:
+        return current
+    if category_id == CATEGORY_DRONE:
+        return "DroneBay"
+    if category_id == CATEGORY_FIGHTER:
+        return "FighterBay"
+    return "Cargo"
+
+
+def bay_flags_by_name(names: set[str]) -> dict[str, str | None]:
+    """Map item names to the bay they belong in, or ``None`` when unknown."""
+    ids = resolve_type_ids(names)
+    categories = type_categories(set(ids.values()))
+    result: dict[str, str | None] = {}
+    for name in names:
+        category = categories.get(ids[name]) if name in ids else None
+        result[name] = bay_flag_for(category, "") or None
+    return result
