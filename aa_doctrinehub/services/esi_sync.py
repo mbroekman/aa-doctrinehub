@@ -234,11 +234,7 @@ def sync_character_snapshot(
 
 def sync_all_characters() -> dict[str, int]:
     """Sync all characters linked to an Alliance Auth user."""
-    characters = (
-        EveCharacter.objects.filter(character_ownership__isnull=False)
-        .distinct()
-        .order_by("character_id")
-    )
+    characters = EveCharacter.objects.filter(character_ownership__isnull=False).distinct().order_by("character_id")
     ok_count = 0
     error_count = 0
     for character in characters:

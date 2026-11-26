@@ -4,25 +4,39 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('aa_doctrinehub', '0002_remove_category_doctrinehub_category_unique_external_and_more'),
+        ("aa_doctrinehub", "0002_remove_category_doctrinehub_category_unique_external_and_more"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='category',
-            name='source',
-            field=models.CharField(choices=[('local', 'Doctrine Hub'), ('fittings', 'Fittings'), ('remote_auth', 'External Auth')], db_index=True, default='local', max_length=16),
+            model_name="category",
+            name="source",
+            field=models.CharField(
+                choices=[("local", "Doctrine Hub"), ("fittings", "Fittings"), ("remote_auth", "External Auth")],
+                db_index=True,
+                default="local",
+                max_length=16,
+            ),
         ),
         migrations.AlterField(
-            model_name='doctrine',
-            name='source',
-            field=models.CharField(choices=[('local', 'Doctrine Hub'), ('fittings', 'Fittings'), ('remote_auth', 'External Auth')], db_index=True, default='local', max_length=16),
+            model_name="doctrine",
+            name="source",
+            field=models.CharField(
+                choices=[("local", "Doctrine Hub"), ("fittings", "Fittings"), ("remote_auth", "External Auth")],
+                db_index=True,
+                default="local",
+                max_length=16,
+            ),
         ),
         migrations.AlterField(
-            model_name='fitting',
-            name='source',
-            field=models.CharField(choices=[('local', 'Doctrine Hub'), ('fittings', 'Fittings'), ('remote_auth', 'External Auth')], db_index=True, default='local', max_length=16),
+            model_name="fitting",
+            name="source",
+            field=models.CharField(
+                choices=[("local", "Doctrine Hub"), ("fittings", "Fittings"), ("remote_auth", "External Auth")],
+                db_index=True,
+                default="local",
+                max_length=16,
+            ),
         ),
     ]

@@ -22,10 +22,10 @@ FITTED_FLAG_PREFIXES = ("HiSlot", "MedSlot", "LoSlot", "RigSlot", "SubSystemSlot
 
 # EVE inventory flag integers for killmail fitted slots
 KILLMAIL_FITTED_FLAGS = (
-    set(range(11, 19))    # Low slots
+    set(range(11, 19))  # Low slots
     | set(range(19, 27))  # Med slots
     | set(range(27, 35))  # High slots
-    | set(range(92, 100)) # Rig slots
+    | set(range(92, 100))  # Rig slots
     | set(range(125, 133))  # Subsystem slots
 )
 
@@ -189,10 +189,7 @@ def count_user_fats(user: User, days: int = 30) -> int | None:
 
 def compute_doctrine_shortages(doctrine: Doctrine) -> list[dict[str, Any]]:
     """Compare doctrine fitting target_count against owned fitted ships across members."""
-    ships = (
-        CharacterAsset.objects.filter(is_singleton=True)
-        .values_list("type_id", flat=True)
-    )
+    ships = CharacterAsset.objects.filter(is_singleton=True).values_list("type_id", flat=True)
     owned_by_type = Counter(ships)
     shortages: list[dict[str, Any]] = []
     for df in doctrine.doctrine_fittings.select_related("fitting").all():

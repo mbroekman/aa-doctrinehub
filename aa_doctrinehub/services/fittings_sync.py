@@ -335,9 +335,7 @@ def apply_snapshot(
         s.external_id: _sync_fitting(s, now, result, source=source, change_note=change_note) for s in snapshot.fittings
     }
     doctrines = {
-        s.external_id: _sync_doctrine(
-            s, fittings, now, result, source=source, prune_missing=prune_missing
-        )
+        s.external_id: _sync_doctrine(s, fittings, now, result, source=source, prune_missing=prune_missing)
         for s in snapshot.doctrines
     }
     _sync_categories(

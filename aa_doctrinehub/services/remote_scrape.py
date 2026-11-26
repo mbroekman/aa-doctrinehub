@@ -114,11 +114,7 @@ def _extract_ship_type_id(soup: BeautifulSoup, ship_type_name: str = "") -> int 
         try:
             from eveuniverse.models import EveType
 
-            eve_id = (
-                EveType.objects.filter(name=ship_type_name)
-                .values_list("id", flat=True)
-                .first()
-            )
+            eve_id = EveType.objects.filter(name=ship_type_name).values_list("id", flat=True).first()
             if eve_id:
                 return int(eve_id)
         except Exception:  # noqa: BLE001 - eveuniverse is optional in minimal test envs
@@ -335,14 +331,10 @@ def iter_scrape_remote_fittings_site(
                 doctrine_fit_ids.append(fid)
 
     required_fit_items = [
-        (fid, fit_links.get(fid, f"Fit {fid}"))
-        for fid in doctrine_fit_ids
-        if fid not in existing_fit_ids
+        (fid, fit_links.get(fid, f"Fit {fid}")) for fid in doctrine_fit_ids if fid not in existing_fit_ids
     ]
     standalone_fit_items = [
-        (fid, name)
-        for fid, name in fit_links.items()
-        if fid not in seen_doc_fit_ids and fid not in existing_fit_ids
+        (fid, name) for fid, name in fit_links.items() if fid not in seen_doc_fit_ids and fid not in existing_fit_ids
     ]
     if limit is not None and limit > 0:
         standalone_fit_items = standalone_fit_items[start : start + limit]
@@ -371,9 +363,7 @@ def iter_scrape_remote_fittings_site(
             yield ("log", f"[Category {idx}/{len(cat_items)}] Scraping {c_name or cat_id}...")
             if request_delay > 0:
                 time.sleep(request_delay)
-            snapshot.categories.append(
-                _scrape_category(session, normalized, cat_id, c_name, timeout=timeout)
-            )
+            snapshot.categories.append(_scrape_category(session, normalized, cat_id, c_name, timeout=timeout))
 
     yield ("snapshot", snapshot)
 
@@ -413,15 +403,9 @@ def scrape_remote_fittings_site(
 
 def preview_remote_scrape(snapshot: SourceSnapshot) -> dict[str, Any]:
     """Summarize what an import of ``snapshot`` would create or update without writing."""
-    existing_doc_ids = set(
-        Doctrine.objects.from_source(Source.REMOTE_AUTH).values_list("external_id", flat=True)
-    )
-    existing_fit_ids = set(
-        Fitting.objects.from_source(Source.REMOTE_AUTH).values_list("external_id", flat=True)
-    )
-    existing_cat_ids = set(
-        Category.objects.from_source(Source.REMOTE_AUTH).values_list("external_id", flat=True)
-    )
+    existing_doc_ids = set(Doctrine.objects.from_source(Source.REMOTE_AUTH).values_list("external_id", flat=True))
+    existing_fit_ids = set(Fitting.objects.from_source(Source.REMOTE_AUTH).values_list("external_id", flat=True))
+    existing_cat_ids = set(Category.objects.from_source(Source.REMOTE_AUTH).values_list("external_id", flat=True))
 
     doctrines_new = sum(1 for d in snapshot.doctrines if d.external_id not in existing_doc_ids)
     fittings_new = sum(1 for f in snapshot.fittings if f.external_id not in existing_fit_ids)
@@ -463,6 +447,7 @@ def preview_remote_fittings_site(
     on_progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Fast index-only preview of doctrines, fittings, and categories on an external Auth."""
+
     def _log(msg: str) -> None:
         if on_progress is not None:
             on_progress(msg)
@@ -485,9 +470,7 @@ def preview_remote_fittings_site(
         cats_soup = _get_html(session, urljoin(normalized, "/fittings/cat/all/"), timeout=timeout)
         cat_links = _extract_links(cats_soup, CAT_DETAIL_RE)
 
-    _log(
-        f"Index summary: {len(doctrine_links)} doctrines, {len(fit_links)} fittings, {len(cat_links)} categories."
-    )
+    _log(f"Index summary: {len(doctrine_links)} doctrines, {len(fit_links)} fittings, {len(cat_links)} categories.")
 
     existing_doc_ids = {
         int(x)
@@ -506,20 +489,10 @@ def preview_remote_fittings_site(
     }
 
     doc_candidates = [
-        (did, name)
-        for did, name in doctrine_links.items()
-        if not (skip_existing and did in existing_doc_ids)
+        (did, name) for did, name in doctrine_links.items() if not (skip_existing and did in existing_doc_ids)
     ]
-    fit_candidates = [
-        (fid, name)
-        for fid, name in fit_links.items()
-        if not (skip_existing and fid in existing_fit_ids)
-    ]
-    cat_candidates = [
-        (cid, name)
-        for cid, name in cat_links.items()
-        if not (skip_existing and cid in existing_cat_ids)
-    ]
+    fit_candidates = [(fid, name) for fid, name in fit_links.items() if not (skip_existing and fid in existing_fit_ids)]
+    cat_candidates = [(cid, name) for cid, name in cat_links.items() if not (skip_existing and cid in existing_cat_ids)]
 
     start = max(0, offset)
     if limit is not None and limit > 0:
