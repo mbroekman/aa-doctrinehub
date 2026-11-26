@@ -57,6 +57,8 @@
   border-radius: 0.75rem;
   border: 1px solid var(--border);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /* Native form controls (select popups, checkboxes, scrollbars) follow the theme. */
+  color-scheme: light;
 }
 
 .aa-spa-root.dark {
@@ -79,6 +81,8 @@
   --border: oklch(0.32 0.014 260);
   --input: oklch(0.28 0.012 260);
   --ring: oklch(0.68 0.16 245);
+
+  color-scheme: dark;
 }
 
 .aa-spa-root *,
@@ -93,6 +97,33 @@
 .aa-spa-root textarea,
 .aa-spa-root select {
   font-family: inherit;
+}
+
+/*
+ * Native <select> and <textarea> elements do not inherit the text colour:
+ * the browser (and Alliance Auth's Bootstrap theme) give them their own,
+ * which left them dark grey on a dark background in the dark theme.
+ * Pin them to the theme variables. :where() keeps the specificity at one
+ * class, so a text-* utility on the element itself still wins.
+ */
+.aa-spa-root :where(select, textarea, input:not([type="checkbox"], [type="radio"])) {
+  color: var(--foreground);
+}
+
+.aa-spa-root :where(select) option,
+.aa-spa-root :where(select) optgroup {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+}
+
+.aa-spa-root :where(textarea, input)::placeholder {
+  color: var(--muted-foreground);
+  opacity: 1;
+}
+
+.aa-spa-root input[type="checkbox"],
+.aa-spa-root input[type="radio"] {
+  accent-color: var(--primary);
 }
 
 .aa-spa-root .eft-block {
