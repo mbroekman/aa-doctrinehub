@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Iterable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field, replace
 
 SLOT_BLOCKS: tuple[str, ...] = ("LoSlot", "MedSlot", "HiSlot", "RigSlot", "SubSystemSlot", "ServiceSlot")
 BAY_BLOCKS: tuple[str, ...] = ("DroneBay", "Cargo")
+BAY_FLAGS = frozenset({"DroneBay", "FighterBay", "Cargo"})
 EXPORT_SLOT_ORDER: tuple[str, ...] = SLOT_BLOCKS
 EXPORT_BAY_ORDER: tuple[str, ...] = ("FighterBay", "DroneBay", "Cargo")
 
@@ -83,6 +84,27 @@ def _parse_bay_line(line: str, flag: str) -> ParsedItem:
 
 def _is_bay_block(block: list[str]) -> bool:
     return all(_QUANTITY_RE.match(line) for line in block)
+
+
+BayClassifier = Callable[[set[str]], dict[str, str | None]]
+
+
+def classify_bays(fitting: ParsedFitting, classifier: BayClassifier) -> ParsedFitting:
+    """Move bay items to the bay their type belongs in.
+
+    EFT does not label bay blocks, so the parser guesses by position: the
+    first block becomes drones. A Titan with only cargo would then show its
+    cargo as drones. ``classifier`` maps item names to ``DroneBay``,
+    ``FighterBay`` or ``Cargo`` (``None`` when unknown, which keeps the guess).
+    """
+    bay_names = {i.type_name for i in fitting.items if i.flag in BAY_FLAGS}
+    if not bay_names:
+        return fitting
+    flags = classifier(bay_names)
+    fitting.items = [
+        replace(i, flag=flags.get(i.type_name) or i.flag) if i.flag in BAY_FLAGS else i for i in fitting.items
+    ]
+    return fitting
 
 
 def parse_eft(text: str) -> ParsedFitting:
