@@ -24,7 +24,7 @@ from django.utils import timezone
 
 from ..models import Category, Doctrine, DoctrineFitting, Fitting, Source, SyncSettings
 from .eft import ExportItem, ParsedFitting, ParsedItem, to_eft
-from .fittings import add_version
+from .fittings import add_version, refresh_requirements
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,9 @@ def _sync_fitting(
     )
     fitting.name = source_item.name
     fitting.description = source_item.description
-    fitting.ship_type_id = source_item.ship_type_id
+    if source_item.ship_type_id or fitting.ship_type_name != source_item.ship_type_name:
+        # Keep an ID we resolved ourselves when the source has none (remote scrapes).
+        fitting.ship_type_id = source_item.ship_type_id or None
     fitting.ship_type_name = source_item.ship_type_name
     fitting.last_synced_at = now
     fitting.save()
@@ -224,10 +226,13 @@ def _sync_fitting(
         for item in version.items.all():
             item.type_id = type_ids.get((item.flag, item.type_name))
             item.save(update_fields=["type_id"])
+        refresh_requirements(fitting, version)
         if created:
             result.fittings_created += 1
         else:
             result.fittings_updated += 1
+    elif current is not None and (not fitting.ship_type_id or not current.skill_requirements.exists()):
+        refresh_requirements(fitting, current)
     return fitting
 
 

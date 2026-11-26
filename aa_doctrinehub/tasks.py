@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from .models import SyncSettings
 from .services.esi_sync import sync_all_characters
+from .services.fittings import refresh_incomplete_fittings
 from .services.fittings_sync import sync_from_fittings_app
 from .services.rules import evaluate_all_rules
 
@@ -32,7 +33,11 @@ def sync_from_fittings(force: bool = False) -> str:
     """Copy doctrines and fittings from the Fittings app when enabled and due.
 
     Runs daily from beat; the interval in days is set in the frontend settings.
+    Every run also fills in hull types and skill requirements that are still missing.
     """
+    refreshed = refresh_incomplete_fittings()
+    if refreshed:
+        logger.info("Refreshed requirements of %d fittings", refreshed)
     settings = SyncSettings.get_solo()
     if not force and not fittings_sync_due(settings):
         return "skipped"
