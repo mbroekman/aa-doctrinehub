@@ -30,7 +30,7 @@ from .models import (
 )
 from .services.eft import EftParseError
 from .services.esi_sync import character_link_status, sync_character_snapshot
-from .services.fittings import import_eft, version_eft, version_multibuy
+from .services.fittings import import_eft, refresh_requirements, version_eft, version_multibuy
 from .services.fittings_sync import fittings_app_installed
 from .services.integrations import (
     compare_killmail_to_fitting,
@@ -46,7 +46,6 @@ from .services.skills import (
     compliance_overview,
     evaluate_fitting_for_user,
     export_skill_plan,
-    extract_dogma_skills_for_version,
 )
 from .services.visibility import visible_doctrines, visible_fittings
 
@@ -478,8 +477,8 @@ def fitting_skills(request: HttpRequest, fitting_id: int) -> JsonResponse:
         return JsonResponse({"deleted": deleted})
 
     if data.get("refresh_dogma"):
-        reqs = extract_dogma_skills_for_version(version)
-        return JsonResponse({"count": len(reqs)})
+        refresh_requirements(fitting, version)
+        return JsonResponse({"count": version.skill_requirements.count()})
 
     skill_id = int(data.get("skill_id") or 0)
     skill_name = str(data.get("skill_name") or "").strip()

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Callable
 from typing import Any
 
@@ -17,51 +16,9 @@ from ..models import (
     FittingSkillRequirement,
     FittingVersion,
 )
-
-# EVE dogma pairs: (requiredSkillN attribute_id, requiredSkillNLevel attribute_id)
-DOGMA_SKILL_ATTRS: list[tuple[int, int]] = [
-    (182, 277),
-    (183, 278),
-    (184, 279),
-    (1285, 1286),
-    (1289, 1287),
-    (1290, 1288),
-]
+from .types import dogma_lookup as default_dogma_lookup
 
 DogmaLookup = Callable[[set[int]], dict[int, list[tuple[int, str, int]]]]
-
-
-def _eveuniverse_dogma_lookup(type_ids: set[int]) -> dict[int, list[tuple[int, str, int]]]:
-    """Read required skills from django-eveuniverse dogma attributes when installed."""
-    if not type_ids:
-        return {}
-    try:
-        from eveuniverse.models import EveType, EveTypeDogmaAttribute
-    except ImportError:
-        return {}
-
-    attr_ids = {aid for pair in DOGMA_SKILL_ATTRS for aid in pair}
-    rows = EveTypeDogmaAttribute.objects.filter(
-        eve_type_id__in=type_ids,
-        dogma_attribute_id__in=attr_ids,
-    ).values_list("eve_type_id", "dogma_attribute_id", "value")
-
-    by_type: dict[int, dict[int, int]] = defaultdict(dict)
-    skill_ids: set[int] = set()
-    for tid, aid, val in rows:
-        by_type[int(tid)][int(aid)] = int(val)
-
-    raw_reqs: dict[int, list[tuple[int, int]]] = defaultdict(list)
-    for tid, attrs in by_type.items():
-        for skill_attr, level_attr in DOGMA_SKILL_ATTRS:
-            sid = attrs.get(skill_attr)
-            lvl = attrs.get(level_attr)
-            if sid and lvl:
-                raw_reqs[tid].append((sid, max(1, min(5, lvl))))
-                skill_ids.add(sid)
-
-    names = {int(tid): str(name) for tid, name in EveType.objects.filter(id__in=skill_ids).values_list("id", "name")}
-    return {tid: [(sid, names.get(sid, f"Skill {sid}"), lvl) for sid, lvl in reqs] for tid, reqs in raw_reqs.items()}
 
 
 @transaction.atomic
@@ -77,8 +34,12 @@ def extract_dogma_skills_for_version(
         if tid:
             type_ids.add(int(tid))
 
-    lookup = dogma_lookup or _eveuniverse_dogma_lookup
+    lookup = dogma_lookup or default_dogma_lookup
     dogma_by_type = lookup(type_ids)
+    ship_type_id = version.fitting.ship_type_id
+    if ship_type_id and ship_type_id not in dogma_by_type:
+        # Every hull needs skills, so the lookup failed (e.g. ESI down). Keep what we had.
+        return list(version.skill_requirements.order_by("skill_name", "skill_id"))
 
     aggregated: dict[int, tuple[str, int]] = {}
     for reqs in dogma_by_type.values():
@@ -122,8 +83,13 @@ def evaluate_fitting_for_snapshot(
     reqs: list[FittingSkillRequirement],
     snapshot: CharacterSkillSnapshot | None,
 ) -> dict[str, Any]:
-    """Evaluate a list of skill requirements against one character snapshot."""
-    if snapshot is None or snapshot.sync_status != CharacterSkillSnapshot.SyncStatus.OK:
+    """Evaluate a list of skill requirements against one character snapshot.
+
+    Without any requirements the status is ``unknown``: the hull always needs
+    skills, so an empty list means they could not be determined, not that
+    everyone can fly it.
+    """
+    if not reqs or snapshot is None or snapshot.sync_status != CharacterSkillSnapshot.SyncStatus.OK:
         return {
             "status": "unknown",
             "missing_required": [],

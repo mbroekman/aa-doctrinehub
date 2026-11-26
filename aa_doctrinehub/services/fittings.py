@@ -7,6 +7,8 @@ from django.db import transaction
 
 from ..models import Fitting, FittingItem, FittingVersion, Source
 from .eft import ExportItem, ParsedFitting, parse_eft, to_eft, to_multibuy
+from .skills import extract_dogma_skills_for_version
+from .types import resolve_type_ids
 
 
 class ReadOnlyFittingError(PermissionError):
@@ -67,6 +69,48 @@ def add_version(
     return version
 
 
+def resolve_fitting_types(fitting: Fitting, version: FittingVersion | None = None) -> None:
+    """Fill in missing type IDs of the hull and of the items of ``version``."""
+    version = version or fitting.current_version
+    items = [i for i in version.items.all() if not i.type_id] if version else []
+    names = {i.type_name for i in items}
+    if not fitting.ship_type_id:
+        names.add(fitting.ship_type_name)
+    ids = resolve_type_ids(names)
+    if not fitting.ship_type_id and ids.get(fitting.ship_type_name):
+        fitting.ship_type_id = ids[fitting.ship_type_name]
+        fitting.save(update_fields=["ship_type_id", "updated_at"])
+    for item in items:
+        if ids.get(item.type_name):
+            item.type_id = ids[item.type_name]
+            item.save(update_fields=["type_id"])
+
+
+def refresh_requirements(fitting: Fitting, version: FittingVersion | None = None) -> None:
+    """Resolve type IDs and recompute the dogma skill requirements of a version."""
+    version = version or fitting.current_version
+    if version is None:
+        return
+    resolve_fitting_types(fitting, version)
+    fitting.refresh_from_db(fields=["ship_type_id"])
+    version.fitting = fitting
+    extract_dogma_skills_for_version(version)
+
+
+def refresh_incomplete_fittings() -> int:
+    """Recompute requirements of fittings without a hull type ID or skill requirements."""
+    count = 0
+    for fitting in Fitting.objects.all():
+        version = fitting.current_version
+        if version is None:
+            continue
+        if fitting.ship_type_id and version.skill_requirements.exists():
+            continue
+        refresh_requirements(fitting, version)
+        count += 1
+    return count
+
+
 @transaction.atomic
 def import_eft(eft: str, user: User | None = None, description: str = "") -> Fitting:
     """Create a new local fitting from EFT text."""
@@ -77,7 +121,8 @@ def import_eft(eft: str, user: User | None = None, description: str = "") -> Fit
         description=description,
         source=Source.LOCAL,
     )
-    add_version(fitting, parsed, eft.strip(), user=user, change_note="Imported from EFT")
+    version = add_version(fitting, parsed, eft.strip(), user=user, change_note="Imported from EFT")
+    refresh_requirements(fitting, version)
     return fitting
 
 
@@ -86,7 +131,11 @@ def update_from_eft(fitting: Fitting, eft: str, user: User | None = None, change
     if not fitting.is_editable:
         raise ReadOnlyFittingError(f"Fitting {fitting.pk} is synced from {fitting.source}")
     parsed = parse_eft(eft)
+    if fitting.ship_type_name != parsed.ship_type_name:
+        fitting.ship_type_id = None
     fitting.name = parsed.name
     fitting.ship_type_name = parsed.ship_type_name
-    fitting.save(update_fields=["name", "ship_type_name", "updated_at"])
-    return add_version(fitting, parsed, eft.strip(), user=user, change_note=change_note)
+    fitting.save(update_fields=["name", "ship_type_name", "ship_type_id", "updated_at"])
+    version = add_version(fitting, parsed, eft.strip(), user=user, change_note=change_note)
+    refresh_requirements(fitting, version)
+    return version
