@@ -9,8 +9,8 @@ from aa_doctrinehub.models import CharacterSkill, CharacterSkillSnapshot, Fittin
 from aa_doctrinehub.services import types
 from aa_doctrinehub.services.eft import BAY_FLAGS
 from aa_doctrinehub.services.fittings import import_eft, refresh_incomplete_fittings, update_from_eft, version_eft
-from aa_doctrinehub.services.types import CATEGORY_DRONE, CATEGORY_FIGHTER
 from aa_doctrinehub.services.skills import evaluate_fitting_for_snapshot, evaluate_fitting_for_user
+from aa_doctrinehub.services.types import CATEGORY_DRONE, CATEGORY_FIGHTER
 
 pytestmark = pytest.mark.django_db
 
